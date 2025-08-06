@@ -15,15 +15,14 @@ sys.path.insert(0, str(bot_dir))
 
 def check_environment():
     """Check if all required environment variables are set"""
+    # Try to load .env file if it exists (for local development)
     env_file = bot_dir / ".env"
-    if not env_file.exists():
-        print("[ERROR] .env file not found!")
-        print(f"Expected location: {env_file}")
-        return False
-    
-    # Load environment variables
-    from dotenv import load_dotenv
-    load_dotenv(env_file)
+    if env_file.exists():
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+        print("[OK] Loaded .env file")
+    else:
+        print("[INFO] No .env file found, using system environment variables")
     
     required_vars = ['TELEGRAM_BOT_TOKEN', 'FOOTBALL_API_KEY']
     missing_vars = []
@@ -34,6 +33,8 @@ def check_environment():
     
     if missing_vars:
         print(f"[ERROR] Missing environment variables: {', '.join(missing_vars)}")
+        print("For local development: Create a .env file")
+        print("For cloud deployment: Set environment variables in your hosting platform")
         return False
     
     print("[OK] Environment variables configured")
