@@ -487,6 +487,48 @@ async def rollover(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in rollover command: {e}")
         await update.message.reply_text("❌ Error applying rollover. Please try again.")
 
+async def debug_user_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug command to check user and group status in database"""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    
+    # Only allow in groups
+    if update.effective_chat.type not in ['group', 'supergroup']:
+        await update.message.reply_text("❌ This bot only works in group chats! Add me to a group to play.")
+        return
+    
+    try:
+        # Check if user exists in database
+        user_info = db.get_user(user_id)
+        user_exists = user_info is not None
+        
+        # Get survivors for this group
+        survivors = db.get_current_survivors(chat_id)
+        survivor_count = len(survivors)
+        user_in_survivors = any(survivor[0] == user_id for survivor in survivors)
+        
+        message = f"🔍 **Debug Info for User {user_id}:**\n\n"
+        message += f"👤 **User in DB:** {'✅ Yes' if user_exists else '❌ No'}\n"
+        
+        if user_exists:
+            message += f"📝 **User Info:** {user_info}\n"
+        
+        message += f"🏆 **Survivors in Group:** {survivor_count}\n"
+        message += f"✅ **User in Survivors:** {'✅ Yes' if user_in_survivors else '❌ No'}\n\n"
+        
+        if survivor_count > 0:
+            message += f"📋 **Survivors List:**\n"
+            for survivor_id, username in survivors[:5]:  # Show first 5
+                message += f"• {username or 'Unknown'} ({survivor_id})\n"
+            if survivor_count > 5:
+                message += f"• ... and {survivor_count - 5} more\n"
+        
+        await update.message.reply_text(message)
+        
+    except Exception as e:
+        logger.error(f"Error in debug command: {e}")
+        await update.message.reply_text(f"❌ Debug error: {e}")
+
 async def round_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show current gameweek information with dynamic deadlines"""
     try:
