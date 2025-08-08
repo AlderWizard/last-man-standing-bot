@@ -21,10 +21,13 @@ import schedule
 import threading
 import time
 from datetime import datetime, timedelta
+import os
 
 # Third-party imports
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+import json
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Local imports
 from config import TELEGRAM_BOT_TOKEN, DEFAULT_LEAGUE
@@ -884,6 +887,47 @@ def run_scheduler():
         time.sleep(60)  # Check every minute
 
 # ============================================================================
+# HEALTH CHECK SERVER (for Render deployment)
+# ============================================================================
+
+class HealthHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler for health checks"""
+    
+    def do_GET(self):
+        """Handle GET requests for health checks"""
+        if self.path in ['/', '/health']:
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            
+            response = {
+                'status': 'healthy',
+                'service': 'Last Man Standing Bot',
+                'timestamp': datetime.now().isoformat()
+            }
+            self.wfile.write(json.dumps(response).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        """Override to reduce logging noise"""
+        pass
+
+def run_health_server():
+    """Run the health check server in a separate thread"""
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Starting health server on 0.0.0.0:{port}")
+    
+    try:
+        server = HTTPServer(('0.0.0.0', port), HealthHandler)
+        logger.info(f"Health server successfully bound to port {port}")
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"Failed to start health server: {e}")
+        raise
+
+# ============================================================================
 # MAIN APPLICATION
 # ============================================================================
 
@@ -892,6 +936,13 @@ def main():
     global application
     
     logger.info("Initializing Last Man Standing bot...")
+    
+    # Start health check server for Render (if PORT is set)
+    if os.environ.get('PORT'):
+        logger.info("Starting health check server for Render deployment...")
+        health_thread = threading.Thread(target=run_health_server, daemon=True)
+        health_thread.start()
+        logger.info(f"Health server started on port {os.environ.get('PORT')}")
     
     # Create Telegram application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
