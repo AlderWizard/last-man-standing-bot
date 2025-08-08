@@ -957,10 +957,83 @@ def keep_alive():
     except Exception as e:
         logger.debug(f"Keep-alive ping failed (this is normal): {e}")
 
+def check_automatic_rollovers():
+    """Check all groups for competitions that should automatically rollover"""
+    try:
+        current_gameweek = get_current_gameweek()
+        
+        # Get all active groups
+        all_groups = db.get_all_groups()
+        
+        for chat_id, chat_title, chat_type in all_groups:
+            try:
+                # Check if picks are closed for current gameweek (meaning round is over)
+                picks_allowed = football_api.is_picks_allowed(current_gameweek)
+                
+                if not picks_allowed:  # Round is over
+                    # Get survivors for this group
+                    survivors = db.get_current_survivors(chat_id)
+                    
+                    # If multiple survivors, automatic rollover needed
+                    if len(survivors) > 1:
+                        logger.info(f"Auto-rollover detected for group {chat_id}: {len(survivors)} survivors")
+                        
+                        # Increment rollover count
+                        db.increment_rollover(chat_id)
+                        
+                        # Reset competition to start fresh round
+                        db.reset_competition(chat_id)
+                        
+                        # Send notification to group
+                        if application:
+                            message = f"🔄 **Automatic Rollover Applied!**\\n\\n"
+                            message += f"👥 **{len(survivors)} survivors remain**\\n"
+                            message += f"💰 **Pot increased for next competition!**\\n\\n"
+                            message += f"🎯 **New competition starting - good luck!**"
+                            
+                            # Send message to group
+                            asyncio.create_task(
+                                application.bot.send_message(chat_id=chat_id, text=message)
+                            )
+                            
+                    elif len(survivors) == 1:
+                        # Single winner - competition complete, reset rollover
+                        winner_id, winner_username = survivors[0]
+                        logger.info(f"Winner detected for group {chat_id}: {winner_username} ({winner_id})")
+                        
+                        # Add winner to winners table
+                        db.add_winner(winner_id, chat_id)
+                        
+                        # Reset rollover count (winner found)
+                        db.reset_rollover(chat_id)
+                        
+                        # Reset competition for new season
+                        db.reset_competition(chat_id)
+                        
+                        # Send winner notification
+                        if application:
+                            message = f"🏆 **WINNER FOUND!**\\n\\n"
+                            message += f"👑 **{winner_username or f'User{winner_id}'} wins the competition!**\\n\\n"
+                            message += f"💰 **Congratulations on your victory!**\\n"
+                            message += f"🎯 **New competition starting with fresh pot!**"
+                            
+                            asyncio.create_task(
+                                application.bot.send_message(chat_id=chat_id, text=message)
+                            )
+                            
+            except Exception as e:
+                logger.error(f"Error checking rollover for group {chat_id}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error in automatic rollover check: {e}")
+
 def run_scheduler():
     """Run the reminder and elimination scheduler in a separate thread."""
     # Check for reminders and eliminations every hour
     schedule.every().hour.do(check_and_send_reminders)
+    
+    # Check for automatic rollovers daily at 10 AM
+    schedule.every().day.at("10:00").do(check_automatic_rollovers)
     
     # Aggressive keep-alive strategy for Render free tier
     if os.environ.get('PORT'):
