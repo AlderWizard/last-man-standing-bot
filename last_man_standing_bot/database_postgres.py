@@ -40,7 +40,7 @@ class Group(Base):
     __tablename__ = 'groups'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    chat_id = Column(Integer, unique=True, nullable=False)
+    chat_id = Column(BigInteger, unique=True, nullable=False)
     chat_title = Column(String(255))
     chat_type = Column(String(50))
     is_active = Column(Boolean, default=True)
@@ -50,8 +50,8 @@ class Winner(Base):
     __tablename__ = 'winners'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=False)
-    chat_id = Column(Integer, nullable=False)
+    user_id = Column(BigInteger, nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
     competition_id = Column(Integer, default=1)
     won_at = Column(DateTime, default=datetime.utcnow)
 
