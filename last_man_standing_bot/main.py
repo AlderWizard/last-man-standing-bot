@@ -32,7 +32,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Local imports
 from config import TELEGRAM_BOT_TOKEN, DEFAULT_LEAGUE
-from database import Database
+from database_postgres import DatabasePostgres as Database
 from football_api import FootballAPI
 
 # Configure logging
