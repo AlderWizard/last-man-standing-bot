@@ -204,8 +204,13 @@ async def pick_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ Picks are currently closed for Gameweek {current_gameweek}!")
             return
         
+        # Ensure user is properly registered in this group (in case they ran /start but weren't added properly)
+        db.add_user_to_group(user.id, chat_id)
+        
         # Check if user is still active in this group
         survivors = db.get_current_survivors(chat_id)
+        logger.info(f"Survivors check: User {user.id} in group {chat_id}. Survivors: {survivors}")
+        
         if user.id not in [s[0] for s in survivors]:
             await update.message.reply_text("❌ You've been eliminated from this group's competition and can't make picks!")
             return
@@ -1028,6 +1033,7 @@ def main():
         ("pot", pot),
         ("rollover", rollover),
         ("round", round_info),
+        ("debug", debug_user_status),  # Temporary debug command
     ]
     
     for command, handler in command_handlers:
