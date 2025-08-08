@@ -121,12 +121,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Add user to database with display name info
     db.add_user(user_id, username, first_name, last_name)
     
-    # Track group chats
+    # Track group chats and add user to group
     if update.effective_chat.type in ['group', 'supergroup']:
         chat_id = update.effective_chat.id
         chat_title = update.effective_chat.title
         chat_type = update.effective_chat.type
         db.add_group(chat_id, chat_title, chat_type)
+        db.add_user_to_group(user_id, chat_id)
     
     current_gameweek = get_current_gameweek()
     
@@ -179,6 +180,9 @@ async def pick_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_title = update.effective_chat.title
             chat_type = update.effective_chat.type
             db.add_group(chat_id, chat_title, chat_type)
+            
+            # Add user to this group
+            db.add_user_to_group(user.id, chat_id)
             
             # Send welcome message for new users
             display_name = db.get_display_name(user.id, user.username, user.first_name, user.last_name)

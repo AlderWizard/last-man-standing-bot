@@ -71,6 +71,15 @@ class Rollover(Base):
     count = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+class GroupMember(Base):
+    __tablename__ = 'group_members'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False)
+    chat_id = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=True)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
 class DatabasePostgres:
     def __init__(self):
         # Use PostgreSQL if DATABASE_URL is set (Render), otherwise SQLite for local dev
@@ -127,6 +136,36 @@ class DatabasePostgres:
         except Exception as e:
             session.rollback()
             logger.error(f"Error adding user {user_id}: {e}")
+        finally:
+            session.close()
+    
+    def add_user_to_group(self, user_id: int, chat_id: int):
+        """Add a user to a specific group"""
+        session = self.Session()
+        try:
+            # Check if user is already in this group
+            existing_member = session.query(GroupMember).filter_by(
+                user_id=user_id, 
+                chat_id=chat_id
+            ).first()
+            
+            if existing_member:
+                # Reactivate if they were previously eliminated
+                existing_member.is_active = True
+            else:
+                # Add user to group
+                new_member = GroupMember(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    is_active=True
+                )
+                session.add(new_member)
+            
+            session.commit()
+            logger.info(f"User {user_id} added to group {chat_id}")
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error adding user {user_id} to group {chat_id}: {e}")
         finally:
             session.close()
     
@@ -231,22 +270,21 @@ class DatabasePostgres:
             # Get current competition for this group
             competition = session.query(Competition).filter_by(chat_id=chat_id, is_active=True).first()
             if not competition:
-                return []
+                # If no competition exists, create one
+                new_competition = Competition(chat_id=chat_id)
+                session.add(new_competition)
+                session.commit()
             
-            # Get all users who are active and have made picks in this competition
-            users = session.query(User).filter_by(is_active=True).all()
-            survivors = []
+            # Get all active group members for this specific group
+            active_members = session.query(GroupMember, User).join(
+                User, GroupMember.user_id == User.user_id
+            ).filter(
+                GroupMember.chat_id == chat_id,
+                GroupMember.is_active == True,
+                User.is_active == True
+            ).all()
             
-            for user in users:
-                # Check if user has made any picks in this group's current competition
-                has_picks = session.query(Pick).filter_by(
-                    user_id=user.user_id,
-                    chat_id=chat_id,
-                    competition_id=competition.id
-                ).first()
-                
-                if has_picks:
-                    survivors.append((user.user_id, user.username))
+            survivors = [(member.user_id, user.username) for member, user in active_members]
             
             return survivors
         except Exception as e:
@@ -278,15 +316,31 @@ class DatabasePostgres:
         finally:
             session.close()
     
-    def eliminate_user(self, user_id: int):
-        """Mark user as eliminated (inactive)"""
+    def eliminate_user(self, user_id: int, chat_id: int = None):
+        """Mark user as eliminated (inactive) in a specific group or globally"""
         session = self.Session()
         try:
-            user = session.query(User).filter_by(user_id=user_id).first()
-            if user:
-                user.is_active = False
-                session.commit()
-                logger.info(f"User {user_id} eliminated")
+            if chat_id:
+                # Eliminate user from specific group only
+                member = session.query(GroupMember).filter_by(
+                    user_id=user_id, 
+                    chat_id=chat_id
+                ).first()
+                if member:
+                    member.is_active = False
+                    session.commit()
+                    logger.info(f"User {user_id} eliminated from group {chat_id}")
+            else:
+                # Global elimination (eliminate from all groups)
+                user = session.query(User).filter_by(user_id=user_id).first()
+                if user:
+                    user.is_active = False
+                    # Also eliminate from all groups
+                    members = session.query(GroupMember).filter_by(user_id=user_id).all()
+                    for member in members:
+                        member.is_active = False
+                    session.commit()
+                    logger.info(f"User {user_id} eliminated globally")
         except Exception as e:
             session.rollback()
             logger.error(f"Error eliminating user {user_id}: {e}")
@@ -329,10 +383,17 @@ class DatabasePostgres:
             session.add(new_competition)
             session.commit()
             
-            # Reactivate all users for the new competition
-            users = session.query(User).all()
+            # Reactivate all group members for this specific group
+            group_members = session.query(GroupMember).filter_by(chat_id=chat_id).all()
+            for member in group_members:
+                member.is_active = True
+            
+            # Also reactivate the users globally (in case they were globally eliminated)
+            user_ids = [member.user_id for member in group_members]
+            users = session.query(User).filter(User.user_id.in_(user_ids)).all()
             for user in users:
                 user.is_active = True
+            
             session.commit()
             
             logger.info(f"Competition reset for group {chat_id}")
