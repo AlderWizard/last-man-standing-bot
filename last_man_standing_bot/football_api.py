@@ -1,6 +1,7 @@
 import requests
 import logging
 from config import FOOTBALL_API_KEY, DEFAULT_SEASON
+from fuzzywuzzy import fuzz, process
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,105 @@ class FootballAPI:
             'burnley': {'id': 44, 'name': 'Burnley'},
             'sheffield united': {'id': 62, 'name': 'Sheffield United'},
             'bournemouth': {'id': 35, 'name': 'AFC Bournemouth'}
+        }
+        
+        # Common team nicknames and aliases for fuzzy matching
+        self.team_aliases = {
+            'spurs': 'tottenham',
+            'city': 'manchester city', 
+            'united': 'manchester united',
+            'man city': 'manchester city',
+            'man united': 'manchester united',
+            'man u': 'manchester united',
+            'manu': 'manchester united',
+            'villa': 'aston villa',
+            'palace': 'crystal palace',
+            'forest': 'nottingham forest',
+            'brighton': 'brighton',
+            'newcastle': 'newcastle',
+            'west ham': 'west ham',
+            'wolves': 'wolves',
+            'saints': 'southampton',  # If Southampton gets promoted
+            'hammers': 'west ham',
+            'gunners': 'arsenal',
+            'blues': 'chelsea',
+            'reds': 'liverpool',
+            'citizens': 'manchester city',
+            'red devils': 'manchester united'
+        }
+    
+    def fuzzy_search_team(self, user_input):
+        """Enhanced team search with fuzzy matching and nickname support"""
+        user_input = user_input.lower().strip()
+        
+        # 1. Check direct aliases first
+        if user_input in self.team_aliases:
+            team_key = self.team_aliases[user_input]
+            if team_key in self.premier_league_teams:
+                team_info = self.premier_league_teams[team_key]
+                return {
+                    'exact_match': True,
+                    'team': team_info,
+                    'confidence': 100,
+                    'user_input': user_input
+                }
+        
+        # 2. Check exact team name matches
+        if user_input in self.premier_league_teams:
+            team_info = self.premier_league_teams[user_input]
+            return {
+                'exact_match': True,
+                'team': team_info,
+                'confidence': 100,
+                'user_input': user_input
+            }
+        
+        # 3. Fuzzy matching against team names and keys
+        all_team_options = []
+        
+        # Add team keys (short names)
+        for key, team_info in self.premier_league_teams.items():
+            all_team_options.append((key, team_info))
+        
+        # Add full team names
+        for key, team_info in self.premier_league_teams.items():
+            all_team_options.append((team_info['name'].lower(), team_info))
+        
+        # Add aliases
+        for alias, team_key in self.team_aliases.items():
+            if team_key in self.premier_league_teams:
+                all_team_options.append((alias, self.premier_league_teams[team_key]))
+        
+        # Find best matches using fuzzy string matching
+        search_strings = [option[0] for option in all_team_options]
+        best_matches = process.extract(user_input, search_strings, limit=3, scorer=fuzz.ratio)
+        
+        # Filter matches with confidence > 60%
+        good_matches = [(match, score) for match, score in best_matches if score >= 60]
+        
+        if good_matches:
+            best_match, confidence = good_matches[0]
+            # Find the team info for the best match
+            for option_name, team_info in all_team_options:
+                if option_name == best_match:
+                    return {
+                        'exact_match': confidence >= 90,
+                        'team': team_info,
+                        'confidence': confidence,
+                        'user_input': user_input,
+                        'matched_text': best_match,
+                        'suggestions': [team_info for match, score in good_matches[:3] 
+                                      for option_name, team_info in all_team_options 
+                                      if option_name == match]
+                    }
+        
+        # No good matches found
+        return {
+            'exact_match': False,
+            'team': None,
+            'confidence': 0,
+            'user_input': user_input,
+            'suggestions': []
         }
     
     def get_fixtures(self, league_id, season, round_number=None):

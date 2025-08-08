@@ -221,15 +221,32 @@ async def pick_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ You already picked {existing_pick[0]} for Gameweek {current_gameweek}!")
             return
         
-        # Search for team
+        # Enhanced fuzzy team search
         try:
-            team_info = football_api.search_team(team_name, DEFAULT_LEAGUE)
-            if not team_info:
-                await update.message.reply_text(f"❌ Couldn't find team '{team_name}'. Please check spelling.")
+            search_result = football_api.fuzzy_search_team(team_name)
+            
+            if not search_result['team']:
+                await update.message.reply_text(
+                    f"❌ Couldn't find team '{team_name}'.\\n"
+                    f"💡 Try: Arsenal, Chelsea, Liverpool, City, United, Spurs, etc."
+                )
                 return
+            
+            team_info = search_result['team']
+            
+            # If fuzzy match with low confidence, ask for confirmation
+            if not search_result['exact_match'] and search_result['confidence'] < 90:
+                confirmation_msg = f"🤔 Did you mean **{team_info['name']}**?\\n"
+                confirmation_msg += f"📝 You typed: '{search_result['user_input']}'\\n"
+                confirmation_msg += f"🎯 Confidence: {search_result['confidence']}%\\n\\n"
+                confirmation_msg += f"Reply with `/pick {team_info['name']}` to confirm."
+                
+                await update.message.reply_text(confirmation_msg)
+                return
+                
         except Exception as e:
-            logging.error(f"API error searching for team: {e}")
-            await update.message.reply_text("❌ Error connecting to football API. Please try again later.")
+            logging.error(f"Error in fuzzy team search: {e}")
+            await update.message.reply_text("❌ Error searching for team. Please try again.")
             return
         
         # Check if user has already used this team in this group
