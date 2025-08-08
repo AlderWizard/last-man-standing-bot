@@ -67,7 +67,7 @@ class Rollover(Base):
     __tablename__ = 'rollovers'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    chat_id = Column(Integer, nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
     count = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -484,5 +484,56 @@ class DatabasePostgres:
         except Exception as e:
             session.rollback()
             logger.error(f"Error resetting rollover for group {chat_id}: {e}")
+        finally:
+            session.close()
+    
+    def calculate_pot_value(self, chat_id: int):
+        """Calculate current pot value for a group"""
+        session = self.Session()
+        try:
+            # Get active player count for this group
+            active_members = session.query(GroupMember).filter_by(
+                chat_id=chat_id,
+                is_active=True
+            ).count()
+            
+            # Get rollover count for this group
+            rollover = session.query(Rollover).filter_by(chat_id=chat_id).first()
+            rollover_count = rollover.count if rollover else 0
+            
+            # Calculate pot value based on rollover count
+            if rollover_count == 0:
+                pot_per_player = 2  # Base pot: £2 per player
+            elif rollover_count == 1:
+                pot_per_player = 5  # After 1 rollover: £5 per player
+            else:
+                pot_per_player = 5 + ((rollover_count - 1) * 5)  # £5 + £5 per additional rollover
+            
+            total_pot = pot_per_player * active_members
+            
+            return total_pot, active_members, rollover_count
+        except Exception as e:
+            logger.error(f"Error calculating pot value for group {chat_id}: {e}")
+            return 0, 0, 0
+        finally:
+            session.close()
+    
+    def increment_rollover(self, chat_id: int):
+        """Increment rollover count for a group"""
+        session = self.Session()
+        try:
+            rollover = session.query(Rollover).filter_by(chat_id=chat_id).first()
+            if rollover:
+                rollover.count += 1
+                rollover.updated_at = datetime.utcnow()
+            else:
+                rollover = Rollover(chat_id=chat_id, count=1)
+                session.add(rollover)
+            
+            session.commit()
+            logger.info(f"Rollover incremented for group {chat_id}: {rollover.count}")
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error incrementing rollover for group {chat_id}: {e}")
         finally:
             session.close()
