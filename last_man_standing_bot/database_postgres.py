@@ -369,6 +369,24 @@ class DatabasePostgres:
         finally:
             session.close()
     
+    def get_user_picks(self, user_id: int, chat_id: int = None):
+        """Get all picks for a user, optionally filtered by group"""
+        session = self.Session()
+        try:
+            query = session.query(Pick).filter_by(user_id=user_id)
+            if chat_id:
+                query = query.filter_by(chat_id=chat_id)
+            
+            picks = query.order_by(Pick.round_number.desc()).all()
+            
+            # Return as tuples: (round_number, team_name, result)
+            return [(pick.round_number, pick.team_name, pick.result or "pending") for pick in picks]
+        except Exception as e:
+            logger.error(f"Error getting picks for user {user_id}: {e}")
+            return []
+        finally:
+            session.close()
+    
     def reset_competition(self, chat_id: int):
         """Reset competition for a specific group"""
         session = self.Session()
