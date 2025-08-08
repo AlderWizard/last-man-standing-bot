@@ -888,9 +888,25 @@ def keep_alive():
         # Only ping if we're on Render (PORT env var exists)
         if os.environ.get('PORT'):
             port = os.environ.get('PORT')
-            # Try to ping our own health endpoint
-            requests.get(f"http://localhost:{port}/health", timeout=10)
-            logger.info("Keep-alive ping sent")
+            # Try multiple endpoints to ensure activity
+            endpoints = ['/health', '/']
+            for endpoint in endpoints:
+                try:
+                    response = requests.get(f"http://localhost:{port}{endpoint}", timeout=5)
+                    if response.status_code == 200:
+                        logger.info(f"Keep-alive ping successful to {endpoint}")
+                        break
+                except:
+                    continue
+            
+            # Also ping external health check services (optional)
+            try:
+                # Ping a reliable external service to generate network activity
+                requests.get("https://httpbin.org/status/200", timeout=5)
+                logger.debug("External keep-alive ping sent")
+            except:
+                pass  # External ping is optional
+                
     except Exception as e:
         logger.debug(f"Keep-alive ping failed (this is normal): {e}")
 
@@ -899,12 +915,21 @@ def run_scheduler():
     # Check for reminders and eliminations every hour
     schedule.every().hour.do(check_and_send_reminders)
     
-    # Keep service awake every 10 minutes (Render sleeps after 15 min)
-    schedule.every(10).minutes.do(keep_alive)
+    # Aggressive keep-alive strategy for Render free tier
+    if os.environ.get('PORT'):
+        # Multiple keep-alive intervals to prevent sleeping
+        schedule.every(5).minutes.do(keep_alive)   # Every 5 minutes
+        schedule.every(10).minutes.do(keep_alive)  # Every 10 minutes (backup)
+        schedule.every(14).minutes.do(keep_alive)  # Just before 15min timeout
+        logger.info("Aggressive keep-alive schedule activated for Render deployment")
+    else:
+        # Less frequent for local development
+        schedule.every(30).minutes.do(keep_alive)
+        logger.info("Standard keep-alive schedule for local development")
     
     while True:
         schedule.run_pending()
-        time.sleep(60)  # Check every minute
+        time.sleep(30)  # Check every 30 seconds for more responsive keep-alive
 
 # ============================================================================
 # HEALTH CHECK SERVER (for Render deployment)
@@ -933,6 +958,25 @@ class HealthHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         """Override to reduce logging noise"""
         pass
+
+def continuous_keep_alive():
+    """Continuous background keep-alive thread for maximum uptime"""
+    if not os.environ.get('PORT'):
+        return  # Only run on Render
+    
+    port = os.environ.get('PORT')
+    logger.info("Starting continuous keep-alive monitor")
+    
+    while True:
+        try:
+            # Self-ping every 3 minutes as a safety net
+            response = requests.get(f"http://localhost:{port}/health", timeout=5)
+            if response.status_code == 200:
+                logger.debug("Continuous keep-alive successful")
+            time.sleep(180)  # 3 minutes
+        except Exception as e:
+            logger.debug(f"Continuous keep-alive failed: {e}")
+            time.sleep(60)  # Retry in 1 minute if failed
 
 def run_health_server():
     """Run the health check server in a separate thread"""
@@ -963,6 +1007,11 @@ def main():
         health_thread = threading.Thread(target=run_health_server, daemon=True)
         health_thread.start()
         logger.info(f"Health server started on port {os.environ.get('PORT')}")
+        
+        # Start continuous keep-alive monitor for maximum uptime
+        keep_alive_thread = threading.Thread(target=continuous_keep_alive, daemon=True)
+        keep_alive_thread.start()
+        logger.info("Continuous keep-alive monitor started")
     
     # Create Telegram application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
