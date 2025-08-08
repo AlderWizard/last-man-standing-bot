@@ -615,3 +615,38 @@ class Database:
         except Exception as e:
             logger.error(f"Error calculating pot value: {e}")
             return 0, 0, 0
+    
+    def get_users_with_picks_for_round(self, round_number: int, chat_id: int):
+        """Get all users who made picks for this round in a specific group"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get current competition ID
+                competition_id = self.get_current_competition_id()
+                
+                cursor.execute('''
+                    SELECT DISTINCT p.user_id, u.username, u.first_name, u.last_name
+                    FROM picks p
+                    JOIN users u ON p.user_id = u.user_id
+                    WHERE p.round_number = ? AND p.chat_id = ? AND p.competition_id = ?
+                    AND u.is_active = 1
+                ''', (round_number, chat_id, competition_id))
+                
+                users = []
+                for row in cursor.fetchall():
+                    user_id, username, first_name, last_name = row
+                    display_name = self.get_display_name(user_id, username, first_name, last_name)
+                    users.append({
+                        'user_id': user_id,
+                        'username': username,
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'display_name': display_name
+                    })
+                
+                return users
+                
+        except Exception as e:
+            logger.error(f"Error getting users with picks for round {round_number}: {e}")
+            return []
