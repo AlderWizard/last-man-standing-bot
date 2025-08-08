@@ -2,7 +2,7 @@ import os
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,7 +16,7 @@ class User(Base):
     __tablename__ = 'users'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, unique=True, nullable=False)
+    user_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String(255))
     first_name = Column(String(255))
     last_name = Column(String(255))
@@ -27,12 +27,12 @@ class Pick(Base):
     __tablename__ = 'picks'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=False)
+    user_id = Column(BigInteger, nullable=False)
     round_number = Column(Integer, nullable=False)
     team_name = Column(String(255), nullable=False)
     team_id = Column(Integer)
     result = Column(String(50))
-    chat_id = Column(Integer, nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
     competition_id = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -59,7 +59,7 @@ class Competition(Base):
     __tablename__ = 'competitions'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    chat_id = Column(Integer, nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -75,8 +75,8 @@ class GroupMember(Base):
     __tablename__ = 'group_members'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=False)
-    chat_id = Column(Integer, nullable=False)
+    user_id = Column(BigInteger, nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
     is_active = Column(Boolean, default=True)
     joined_at = Column(DateTime, default=datetime.utcnow)
 
