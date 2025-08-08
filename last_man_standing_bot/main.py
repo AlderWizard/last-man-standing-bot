@@ -22,6 +22,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 import os
+import requests
 
 # Third-party imports
 from telegram import Update
@@ -877,10 +878,25 @@ def check_and_send_reminders():
 # BACKGROUND SCHEDULER
 # ============================================================================
 
+def keep_alive():
+    """Ping the health endpoint to keep Render service awake"""
+    try:
+        # Only ping if we're on Render (PORT env var exists)
+        if os.environ.get('PORT'):
+            port = os.environ.get('PORT')
+            # Try to ping our own health endpoint
+            requests.get(f"http://localhost:{port}/health", timeout=10)
+            logger.info("Keep-alive ping sent")
+    except Exception as e:
+        logger.debug(f"Keep-alive ping failed (this is normal): {e}")
+
 def run_scheduler():
     """Run the reminder and elimination scheduler in a separate thread."""
     # Check for reminders and eliminations every hour
     schedule.every().hour.do(check_and_send_reminders)
+    
+    # Keep service awake every 10 minutes (Render sleeps after 15 min)
+    schedule.every(10).minutes.do(keep_alive)
     
     while True:
         schedule.run_pending()
