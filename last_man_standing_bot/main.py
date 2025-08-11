@@ -385,9 +385,16 @@ async def survivors(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     message = f"🏆 **Current Survivors in this group ({len(survivor_list)}):**\n\n"
-    for user_id, username in survivor_list:
-        # Get display name for each survivor
-        display_name = db.get_display_name(user_id, username)
+    for user_id, username, first_name, last_name in survivor_list:
+        # Use first_name if available, otherwise username, otherwise user_id
+        if first_name:
+            display_name = first_name
+            if last_name:
+                display_name += f" {last_name}"
+        elif username:
+            display_name = username
+        else:
+            display_name = f"User {user_id}"
         message += f"• {display_name}\n"
     
     message += f"\n💪 Keep fighting, survivors!"
@@ -703,8 +710,8 @@ async def roast_deadline_missers(missed_users, gameweek, chat_id):
         
         # Create roast message for deadline missers
         if len(missed_users) == 1:
-            user_id, username = missed_users[0]
-            display_name = db.get_display_name(user_id, username)
+            user_id, username, first_name, last_name = missed_users[0]
+            display_name = first_name if first_name else username
             
             # Pick random deadline roast message
             roast_template = random.choice(DEADLINE_MISS_ROASTS)
@@ -714,8 +721,8 @@ async def roast_deadline_missers(missed_users, gameweek, chat_id):
         else:
             # Multiple deadline missers
             names = []
-            for user_id, username in missed_users:
-                display_name = db.get_display_name(user_id, username)
+            for user_id, username, first_name, last_name in missed_users:
+                display_name = first_name if first_name else username
                 names.append(display_name)
             
             message = f"🤦‍♂️ **MASS DEADLINE DISASTER!** 🤦‍♂️\n\n"
@@ -746,8 +753,8 @@ async def roast_eliminated_users(eliminated_users, gameweek, chat_id, all_elimin
         # Special message if everyone was eliminated (no joint winners rule)
         if all_eliminated:
             names = []
-            for user_id, username in eliminated_users:
-                display_name = db.get_display_name(user_id, username)
+            for user_id, username, first_name, last_name in eliminated_users:
+                display_name = first_name if first_name else username
                 names.append(display_name)
             
             message = f"💀 **TOTAL ANNIHILATION!** 💀\n\n"
@@ -760,8 +767,8 @@ async def roast_eliminated_users(eliminated_users, gameweek, chat_id, all_elimin
             
         # Create elimination message for normal eliminations
         elif len(eliminated_users) == 1:
-            user_id, username = eliminated_users[0]
-            display_name = db.get_display_name(user_id, username)
+            user_id, username, first_name, last_name = eliminated_users[0]
+            display_name = first_name if first_name else username
             
             # Pick random roast message
             roast_template = random.choice(ELIMINATION_ROASTS)
@@ -771,8 +778,8 @@ async def roast_eliminated_users(eliminated_users, gameweek, chat_id, all_elimin
         else:
             # Multiple eliminations (but not everyone)
             names = []
-            for user_id, username in eliminated_users:
-                display_name = db.get_display_name(user_id, username)
+            for user_id, username, first_name, last_name in eliminated_users:
+                display_name = first_name if first_name else username
                 names.append(display_name)
             
             message = f"💥 **MASS ELIMINATION EVENT!** 💥\n\n"
@@ -826,11 +833,12 @@ async def check_for_eliminations():
                     
                     # Find users who missed the deadline in this group
                     users_with_picks_ids = {user_id for user_id, _, _, _ in users_with_picks}
-                    for user_id, username in all_active_users:
+                    for user_id, username, first_name, last_name in all_active_users:
                         if user_id not in users_with_picks_ids:
-                            missed_deadline_users.append((user_id, username))
-                            eliminated_users.append((user_id, username))
-                            logging.info(f"Eliminated user {username} ({user_id}) from group {chat_title} - missed deadline")
+                            missed_deadline_users.append((user_id, username, first_name, last_name))
+                            eliminated_users.append((user_id, username, first_name, last_name))
+                            display_name = first_name if first_name else username
+                            logging.info(f"Eliminated user {display_name} ({user_id}) from group {chat_title} - missed deadline")
                 
                     # Process users who made picks in this group
                     for user_id, username, first_name, last_name in users_with_picks:
@@ -862,10 +870,11 @@ async def check_for_eliminations():
                         
                         # Categorize users based on their team's performance
                         if team_won:
-                            surviving_users.append((user_id, username))
+                            surviving_users.append((user_id, username, first_name, last_name))
                         else:
-                            eliminated_users.append((user_id, username))
-                            logging.info(f"Eliminated user {username} ({user_id}) from group {chat_title} - team {team_name} didn't win")
+                            eliminated_users.append((user_id, username, first_name, last_name))
+                            display_name = first_name if first_name else username
+                            logging.info(f"Eliminated user {display_name} ({user_id}) from group {chat_title} - team {team_name} didn't win")
                     
                     # Send deadline miss roasts first if anyone missed the deadline in this group
                     if missed_deadline_users:
@@ -873,8 +882,8 @@ async def check_for_eliminations():
                     
                     # Check if we have a single winner in this group
                     if len(surviving_users) == 1 and eliminated_users:
-                        winner_user_id, winner_username = surviving_users[0]
-                        winner_display_name = db.get_display_name(winner_user_id, winner_username)
+                        winner_user_id, winner_username, winner_first_name, winner_last_name = surviving_users[0]
+                        winner_display_name = winner_first_name if winner_first_name else winner_username
                         
                         # Add winner to winners table for this group
                         db.add_winner(winner_user_id, chat_id)

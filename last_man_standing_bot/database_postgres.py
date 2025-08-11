@@ -284,7 +284,7 @@ class DatabasePostgres:
                 User.is_active == True
             ).all()
             
-            survivors = [(member.user_id, user.username) for member, user in active_members]
+            survivors = [(member.user_id, user.username, user.first_name, user.last_name) for member, user in active_members]
             
             return survivors
         except Exception as e:
@@ -535,6 +535,39 @@ class DatabasePostgres:
         except Exception as e:
             session.rollback()
             logger.error(f"Error incrementing rollover for group {chat_id}: {e}")
+        finally:
+            session.close()
+    
+    def get_display_name(self, user_id: int, username: str = None, first_name: str = None, last_name: str = None):
+        """Get display name for user - prioritize first_name over username"""
+        session = self.Session()
+        try:
+            user = session.query(User).filter_by(user_id=user_id).first()
+            if user:
+                # Prioritize first_name + last_name, fallback to username
+                if user.first_name:
+                    display_name = user.first_name
+                    if user.last_name:
+                        display_name += f" {user.last_name}"
+                    return display_name
+                elif user.username:
+                    return user.username
+                else:
+                    return f"User {user_id}"
+            else:
+                # Fallback to provided parameters if user not in database
+                if first_name:
+                    display_name = first_name
+                    if last_name:
+                        display_name += f" {last_name}"
+                    return display_name
+                elif username:
+                    return username
+                else:
+                    return f"User {user_id}"
+        except Exception as e:
+            logger.error(f"Error getting display name for user {user_id}: {e}")
+            return username if username else f"User {user_id}"
         finally:
             session.close()
     
