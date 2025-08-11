@@ -327,7 +327,7 @@ async def change_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ You haven't made a pick for Gameweek {current_gameweek} yet! Use /pick instead.")
             return
         
-        old_team_name, old_team_id = existing_pick
+        old_team_name, old_team_id, _ = existing_pick
         
         # Search for new team
         try:
