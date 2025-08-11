@@ -537,3 +537,54 @@ class DatabasePostgres:
             logger.error(f"Error incrementing rollover for group {chat_id}: {e}")
         finally:
             session.close()
+    
+    def change_user_pick(self, user_id: int, round_number: int, new_team_name: str, new_team_id: int, old_team_id: int, chat_id: int):
+        """Change user's pick for a round and block the old team permanently"""
+        session = self.Session()
+        try:
+            # Get current competition for this group
+            competition = session.query(Competition).filter_by(chat_id=chat_id, is_active=True).first()
+            competition_id = competition.id if competition else 1
+            
+            # Update the existing pick
+            existing_pick = session.query(Pick).filter_by(
+                user_id=user_id,
+                round_number=round_number,
+                chat_id=chat_id,
+                competition_id=competition_id
+            ).first()
+            
+            if existing_pick:
+                # Store old team name for blocking
+                old_team_name = existing_pick.team_name
+                
+                # Update the pick with new team
+                existing_pick.team_name = new_team_name
+                existing_pick.team_id = new_team_id
+                
+                # Create a "blocked" pick entry for the old team to prevent future use
+                # This ensures the old team is permanently blocked for this user in this group
+                blocked_pick = Pick(
+                    user_id=user_id,
+                    round_number=-1,  # Special round number to indicate blocked team
+                    team_name=f"BLOCKED_{old_team_name}",
+                    team_id=old_team_id,
+                    result="BLOCKED",
+                    chat_id=chat_id,
+                    competition_id=competition_id
+                )
+                session.add(blocked_pick)
+                
+                session.commit()
+                logger.info(f"Pick changed for user {user_id}: {new_team_name}, old team {old_team_id} blocked")
+                return True
+            else:
+                logger.error(f"No existing pick found for user {user_id}, round {round_number}")
+                return False
+                
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error changing pick for user {user_id}: {e}")
+            return False
+        finally:
+            session.close()
