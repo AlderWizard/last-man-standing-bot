@@ -31,9 +31,9 @@ class FootballAPI:
             'everton': {'id': 45, 'name': 'Everton'},
             'brentford': {'id': 55, 'name': 'Brentford'},
             'nottingham forest': {'id': 65, 'name': 'Nottingham Forest'},
-            'luton': {'id': 163, 'name': 'Luton Town'},
+            'leeds': {'id': 18, 'name': 'Leeds United'},
             'burnley': {'id': 44, 'name': 'Burnley'},
-            'sheffield united': {'id': 62, 'name': 'Sheffield United'},
+            'sunderland': {'id': 179, 'name': 'Sunderland'},
             'bournemouth': {'id': 35, 'name': 'AFC Bournemouth'}
         }
         
@@ -53,7 +53,8 @@ class FootballAPI:
             'newcastle': 'newcastle',
             'west ham': 'west ham',
             'wolves': 'wolves',
-            'saints': 'southampton',  # If Southampton gets promoted
+            'leeds united': 'leeds',
+            'leeds utd': 'leeds',
             'hammers': 'west ham',
             'gunners': 'arsenal',
             'blues': 'chelsea',
