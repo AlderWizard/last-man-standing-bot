@@ -418,7 +418,15 @@ async def winners(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = f"🏆 **Hall of Fame - Competition Winners (This Group):**\n\n"
     
     for user_id, username, first_name, last_name, wins in winner_stats:
-        display_name = db.get_display_name(user_id, username, first_name, last_name)
+        # Use first_name if available, otherwise username
+        if first_name:
+            display_name = first_name
+            if last_name:
+                display_name += f" {last_name}"
+        elif username:
+            display_name = username
+        else:
+            display_name = f"User {user_id}"
         
         # Add trophy emojis based on number of wins
         if wins >= 5:

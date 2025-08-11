@@ -571,6 +571,35 @@ class DatabasePostgres:
         finally:
             session.close()
     
+    def get_winner_stats(self, chat_id: int):
+        """Get winner statistics for a specific group"""
+        from sqlalchemy import func
+        session = self.Session()
+        try:
+            # Get all winners for this group with user details
+            winner_stats = session.query(
+                Winner.user_id,
+                User.username,
+                User.first_name,
+                User.last_name,
+                func.count(Winner.id).label('wins')
+            ).join(
+                User, Winner.user_id == User.user_id
+            ).filter(
+                Winner.chat_id == chat_id
+            ).group_by(
+                Winner.user_id, User.username, User.first_name, User.last_name
+            ).order_by(
+                func.count(Winner.id).desc()
+            ).all()
+            
+            return winner_stats
+        except Exception as e:
+            logger.error(f"Error getting winner stats for group {chat_id}: {e}")
+            return []
+        finally:
+            session.close()
+    
     def change_user_pick(self, user_id: int, round_number: int, new_team_name: str, new_team_id: int, old_team_id: int, chat_id: int):
         """Change user's pick for a round and block the old team permanently"""
         session = self.Session()
