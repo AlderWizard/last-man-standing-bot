@@ -1,6 +1,9 @@
 # Last Man Standing Football Bot
 
-A Telegram bot that runs a "Last Man Standing" football prediction competition.
+A Telegram bot for running Last Man Standing football competitions with group isolation.
+
+## Webhook Test
+Testing instant deployment via GitHub webhooks - this should trigger auto-update on Pi!
 
 ## How It Works
 - Players pick ONE team each round that they think will win
