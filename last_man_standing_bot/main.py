@@ -870,6 +870,18 @@ async def check_for_eliminations():
                     all_active_users = db.get_current_survivors(chat_id)
                     users_with_picks = db.get_users_with_picks_for_round(current_gameweek, chat_id)
                     
+                    # SAFETY CHECK: If database is wiped/empty, don't process eliminations
+                    # This prevents false elimination messages when there are no users or picks
+                    if not all_active_users and not users_with_picks:
+                        logging.info(f"Skipping elimination processing for group {chat_title} - no active users or picks found (possible database wipe)")
+                        continue
+                    
+                    # ADDITIONAL SAFETY: If there are users but no picks at all, it might be a fresh start
+                    # Only skip if ALL users have no picks (indicating fresh competition or database issue)
+                    if all_active_users and not users_with_picks:
+                        logging.info(f"Skipping elimination processing for group {chat_title} - users exist but no picks found for gameweek {current_gameweek} (possible fresh start or database issue)")
+                        continue
+                    
                     # Find users who missed the deadline in this group
                     users_with_picks_ids = {user_id for user_id, _, _, _ in users_with_picks}
                     for user_id, username, first_name, last_name in all_active_users:

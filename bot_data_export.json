@@ -1,0 +1,33 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "user_id": 1151403579,
+      "username": "ineedauser",
+      "is_active": 1,
+      "created_at": "2025-08-06 21:44:25"
+    }
+  ],
+  "picks": [
+    {
+      "id": 1,
+      "user_id": 1151403579,
+      "round_number": 1,
+      "team_name": "Tottenham",
+      "team_id": 47,
+      "match_id": null,
+      "result": "pending",
+      "created_at": "2025-08-06 21:44:40"
+    }
+  ],
+  "sqlite_sequence": [
+    {
+      "name": "users",
+      "seq": 1
+    },
+    {
+      "name": "picks",
+      "seq": 1
+    }
+  ]
+}
