@@ -548,7 +548,7 @@ async def debug_user_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Debug error: {e}")
 
 async def export_data_to_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """TEMPORARY: Export database data to logs for migration from Render"""
+    """TEMPORARY: Export ALL database data to logs for migration from Render"""
     try:
         import sqlite3
         import json
@@ -563,21 +563,30 @@ async def export_data_to_logs(update: Update, context: ContextTypes.DEFAULT_TYPE
         tables = [row[0] for row in cursor.fetchall()]
         
         data = {}
+        total_rows = 0
         
-        # Export each table
+        # Export each table with detailed logging
         for table in tables:
             cursor.execute(f"SELECT * FROM {table}")
             rows = cursor.fetchall()
             data[table] = [dict(row) for row in rows]
+            total_rows += len(rows)
+            logger.info(f"Exported {len(rows)} rows from table '{table}'")
         
-        # Log the data (this will appear in Render logs)
+        # Log summary first
+        logger.info(f"=== EXPORT SUMMARY ===")
+        logger.info(f"Total tables: {len(tables)}")
+        logger.info(f"Total rows: {total_rows}")
+        logger.info(f"Tables: {', '.join(tables)}")
+        
+        # Log the complete data (this will appear in Render logs)
         logger.info("=== DATABASE EXPORT START ===")
         logger.info(json.dumps(data, indent=2, default=str))
         logger.info("=== DATABASE EXPORT END ===")
         
         conn.close()
         
-        await update.message.reply_text(f"✅ Data exported to logs! Check Render logs for JSON data between START/END markers.")
+        await update.message.reply_text(f"✅ Complete data exported to logs!\n📊 {len(tables)} tables, {total_rows} total rows\n📋 Tables: {', '.join(tables)}\n\nCheck Render logs for JSON data between START/END markers.")
         
     except Exception as e:
         await update.message.reply_text(f"❌ Export failed: {str(e)}")
