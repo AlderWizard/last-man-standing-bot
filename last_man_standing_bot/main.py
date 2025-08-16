@@ -521,45 +521,67 @@ async def rollover(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def debug_user_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Debug command to check user and group status in database"""
-    chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    
-    # Only allow in groups
-    if update.effective_chat.type not in ['group', 'supergroup']:
-        await update.message.reply_text("❌ This bot only works in group chats! Add me to a group to play.")
-        return
+    chat_id = update.effective_chat.id
     
     try:
-        # Check if user exists in database
-        user_info = db.get_user(user_id)
-        user_exists = user_info is not None
-        
-        # Get survivors for this group
+        # Get user info from database
+        user_info = db.get_user_info(user_id, chat_id)
         survivors = db.get_current_survivors(chat_id)
-        survivor_count = len(survivors)
-        user_in_survivors = any(survivor[0] == user_id for survivor in survivors)
+        current_gameweek = get_current_gameweek()
+        user_pick = db.get_user_pick_for_round(user_id, current_gameweek)
         
-        message = f"🔍 **Debug Info for User {user_id}:**\n\n"
-        message += f"👤 **User in DB:** {'✅ Yes' if user_exists else '❌ No'}\n"
+        message = f"🔍 **Debug Info for User {user_id}**\\n\\n"
+        message += f"📊 **User in DB:** {'Yes' if user_info else 'No'}\\n"
+        message += f"👥 **Current Survivors:** {len(survivors)}\\n"
+        message += f"🎯 **Current Gameweek:** {current_gameweek}\\n"
+        message += f"⚽ **User Pick:** {user_pick[0] if user_pick else 'None'}\\n"
         
-        if user_exists:
-            message += f"📝 **User Info:** {user_info}\n"
+        if user_info:
+            message += f"👤 **Username:** {user_info[1]}\\n"
+            message += f"🏆 **Status:** {'Survivor' if any(s[0] == user_id for s in survivors) else 'Eliminated'}\\n"
         
-        message += f"🏆 **Survivors in Group:** {survivor_count}\n"
-        message += f"✅ **User in Survivors:** {'✅ Yes' if user_in_survivors else '❌ No'}\n\n"
-        
-        if survivor_count > 0:
-            message += f"📋 **Survivors List:**\n"
-            for survivor_id, username in survivors[:5]:  # Show first 5
-                message += f"• {username or 'Unknown'} ({survivor_id})\n"
-            if survivor_count > 5:
-                message += f"• ... and {survivor_count - 5} more\n"
-        
-        await update.message.reply_text(message)
+        await update.message.reply_text(message, parse_mode='Markdown')
         
     except Exception as e:
         logger.error(f"Error in debug command: {e}")
         await update.message.reply_text(f"❌ Debug error: {e}")
+
+async def export_data_to_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """TEMPORARY: Export database data to logs for migration from Render"""
+    try:
+        import sqlite3
+        import json
+        
+        # Connect to database
+        conn = sqlite3.connect("lastman.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Get all tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [row[0] for row in cursor.fetchall()]
+        
+        data = {}
+        
+        # Export each table
+        for table in tables:
+            cursor.execute(f"SELECT * FROM {table}")
+            rows = cursor.fetchall()
+            data[table] = [dict(row) for row in rows]
+        
+        # Log the data (this will appear in Render logs)
+        logger.info("=== DATABASE EXPORT START ===")
+        logger.info(json.dumps(data, indent=2, default=str))
+        logger.info("=== DATABASE EXPORT END ===")
+        
+        conn.close()
+        
+        await update.message.reply_text(f"✅ Data exported to logs! Check Render logs for JSON data between START/END markers.")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Export failed: {str(e)}")
+        logger.error(f"Export command error: {e}")
 
 async def round_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show current gameweek information with dynamic deadlines"""
@@ -1183,6 +1205,7 @@ def main():
         ("rollover", rollover),
         ("round", round_info),
         ("debug", debug_user_status),  # Temporary debug command
+        ("exportdata", export_data_to_logs),  # Temporary export command for migration
     ]
     
     for command, handler in command_handlers:
