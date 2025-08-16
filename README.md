@@ -5,6 +5,8 @@ A Telegram bot for running Last Man Standing football competitions with group is
 ## Webhook Test
 Testing instant deployment via GitHub webhooks - this should trigger auto-update on Pi!
 
+**Test 2**: Webhook configured with IP 192.168.0.66:9000 - testing instant deployment!
+
 ## How It Works
 - Players pick ONE team each round that they think will win
 - Each team can only be picked ONCE during the entire competition
