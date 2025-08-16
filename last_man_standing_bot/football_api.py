@@ -250,47 +250,53 @@ class FootballAPI:
         try:
             url = f"{self.base_url}/fixtures"
             
-            # Try different round formats that the API might use
-            round_formats = [
-                f"Regular Season - {gameweek}",
-                f"Matchday {gameweek}",
-                f"Round {gameweek}",
-                str(gameweek)
-            ]
+            # Try multiple season formats in case the API uses different conventions
+            season_formats = [season, 2025, 2024]  # Try current config, then common alternatives
             
-            fixtures = []
-            for round_format in round_formats:
-                params = {
-                    'league': league_id,
-                    'season': season,
-                    'round': round_format
-                }
+            for season_try in season_formats:
+                logger.info(f"Trying season format: {season_try}")
                 
-                try:
-                    response = requests.get(url, headers=self.headers, params=params, timeout=10)
-                    response.raise_for_status()
+                # Try different round formats that the API might use
+                round_formats = [
+                    f"Regular Season - {gameweek}",
+                    f"Matchday {gameweek}",
+                    f"Round {gameweek}",
+                    str(gameweek)
+                ]
+                
+                fixtures = []
+                for round_format in round_formats:
+                    params = {
+                        'league': league_id,
+                        'season': season_try,
+                        'round': round_format
+                    }
                     
-                    data = response.json()
-                    if 'response' in data and data['response']:
-                        logger.info(f"Found fixtures using round format: {round_format}")
-                        for fixture in data['response']:
-                            fixtures.append({
-                                'id': fixture['fixture']['id'],
-                                'date': fixture['fixture']['date'],
-                                'timestamp': fixture['fixture']['timestamp'],
-                                'status': fixture['fixture']['status']['short'],
-                                'home_team': fixture['teams']['home']['name'],
-                                'away_team': fixture['teams']['away']['name'],
-                                'home_score': fixture['goals']['home'],
-                                'away_score': fixture['goals']['away']
-                            })
-                        return fixtures
-                except Exception as format_error:
-                    logger.debug(f"Round format '{round_format}' failed: {format_error}")
-                    continue
+                    try:
+                        response = requests.get(url, headers=self.headers, params=params, timeout=10)
+                        response.raise_for_status()
+                        
+                        data = response.json()
+                        if 'response' in data and data['response']:
+                            logger.info(f"Found fixtures using season {season_try} and round format: {round_format}")
+                            for fixture in data['response']:
+                                fixtures.append({
+                                    'id': fixture['fixture']['id'],
+                                    'date': fixture['fixture']['date'],
+                                    'timestamp': fixture['fixture']['timestamp'],
+                                    'status': fixture['fixture']['status']['short'],
+                                    'home_team': fixture['teams']['home']['name'],
+                                    'away_team': fixture['teams']['away']['name'],
+                                    'home_score': fixture['goals']['home'],
+                                    'away_score': fixture['goals']['away']
+                                })
+                            return fixtures
+                    except Exception as format_error:
+                        logger.debug(f"Season {season_try}, round format '{round_format}' failed: {format_error}")
+                        continue
             
             # If no round format worked, try getting current/upcoming fixtures without round filter
-            logger.warning(f"No fixtures found for gameweek {gameweek} with any round format, trying date-based approach")
+            logger.warning(f"No fixtures found for gameweek {gameweek} with any season/round format, trying date-based approach")
             return self._get_current_fixtures(league_id, season)
             
         except Exception as e:
@@ -307,40 +313,50 @@ class FootballAPI:
             today = datetime.now().strftime('%Y-%m-%d')
             next_week = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
             
-            params = {
-                'league': league_id,
-                'season': season,
-                'from': today,
-                'to': next_week,
-                'status': 'NS'  # Not Started
-            }
+            # Try multiple season formats for the date-based approach too
+            season_formats = [season, 2025, 2024]
             
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            if 'response' in data and data['response']:
-                fixtures = []
-                for fixture in data['response']:
-                    fixtures.append({
-                        'id': fixture['fixture']['id'],
-                        'date': fixture['fixture']['date'],
-                        'timestamp': fixture['fixture']['timestamp'],
-                        'status': fixture['fixture']['status']['short'],
-                        'home_team': fixture['teams']['home']['name'],
-                        'away_team': fixture['teams']['away']['name'],
-                        'home_score': fixture['goals']['home'],
-                        'away_score': fixture['goals']['away']
-                    })
-                logger.info(f"Found {len(fixtures)} upcoming fixtures using date-based approach")
-                return fixtures
+            for season_try in season_formats:
+                logger.info(f"Trying date-based approach with season: {season_try}")
+                
+                params = {
+                    'league': league_id,
+                    'season': season_try,
+                    'from': today,
+                    'to': next_week,
+                    'status': 'NS'  # Not Started
+                }
+                
+                try:
+                    response = requests.get(url, headers=self.headers, params=params, timeout=10)
+                    response.raise_for_status()
+                    
+                    data = response.json()
+                    if 'response' in data and data['response']:
+                        fixtures = []
+                        for fixture in data['response']:
+                            fixtures.append({
+                                'id': fixture['fixture']['id'],
+                                'date': fixture['fixture']['date'],
+                                'timestamp': fixture['fixture']['timestamp'],
+                                'status': fixture['fixture']['status']['short'],
+                                'home_team': fixture['teams']['home']['name'],
+                                'away_team': fixture['teams']['away']['name'],
+                                'home_score': fixture['goals']['home'],
+                                'away_score': fixture['goals']['away']
+                            })
+                        logger.info(f"Found {len(fixtures)} upcoming fixtures using date-based approach with season {season_try}")
+                        return fixtures
+                except Exception as season_error:
+                    logger.debug(f"Date-based approach failed for season {season_try}: {season_error}")
+                    continue
             
             return []
             
         except Exception as e:
             logger.error(f"Error in fallback fixture method: {e}")
             return []
-    
+
     def get_gameweek_deadline(self, gameweek, league_id=39, season=DEFAULT_SEASON):
         """Get pick deadline for gameweek (2 hours before first match)"""
         from datetime import datetime, timedelta
