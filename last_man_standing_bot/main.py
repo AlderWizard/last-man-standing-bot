@@ -637,6 +637,150 @@ async def round_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Error in round_info: {e}")
         await update.message.reply_text("❌ Error getting gameweek information. Please try again.")
 
+async def kill_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only command to eliminate a user from current competition (only @ineedauser)"""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    # Only allow in groups
+    if update.effective_chat.type not in ['group', 'supergroup']:
+        await update.message.reply_text("❌ This bot only works in group chats! Add me to a group to play.")
+        return
+    
+    # Check if user is @ineedauser (replace with actual username check)
+    if user.username != "ineedauser":
+        await update.message.reply_text("❌ Only @ineedauser can use this command!")
+        return
+    
+    try:
+        # Check if a target user was specified
+        if not context.args:
+            await update.message.reply_text("❌ Please specify a user to eliminate!\nUsage: /kill @username or /kill firstname")
+            return
+        
+        target_input = " ".join(context.args).strip()
+        
+        # Remove @ if present
+        if target_input.startswith("@"):
+            target_input = target_input[1:]
+        
+        # Get all current survivors in this group
+        survivors = db.get_current_survivors(chat_id)
+        
+        # Find the target user
+        target_user = None
+        for user_id, username, first_name, last_name in survivors:
+            if (username and username.lower() == target_input.lower()) or \
+               (first_name and first_name.lower() == target_input.lower()) or \
+               (last_name and last_name.lower() == target_input.lower()):
+                target_user = (user_id, username, first_name, last_name)
+                break
+        
+        if not target_user:
+            await update.message.reply_text(f"❌ User '{target_input}' not found in current survivors!")
+            return
+        
+        user_id, username, first_name, last_name = target_user
+        display_name = first_name if first_name else username
+        
+        # Eliminate the user from this group only
+        db.eliminate_user(user_id, chat_id)
+        
+        # Send confirmation message
+        await update.message.reply_text(f"💀 **ADMIN ELIMINATION**\n\n{display_name} has been eliminated from the current competition by admin command!\n\n⚰️ RIP {display_name} - eliminated by the powers that be!")
+        
+        logger.info(f"Admin {user.username} eliminated user {display_name} ({user_id}) from group {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"Error in kill command: {e}")
+        await update.message.reply_text(f"❌ Error eliminating user: {str(e)}")
+
+async def revive_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only command to restore a user to current competition (only @ineedauser)"""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    # Only allow in groups
+    if update.effective_chat.type not in ['group', 'supergroup']:
+        await update.message.reply_text("❌ This bot only works in group chats! Add me to a group to play.")
+        return
+    
+    # Check if user is @ineedauser
+    if user.username != "ineedauser":
+        await update.message.reply_text("❌ Only @ineedauser can use this command!")
+        return
+    
+    try:
+        # Check if a target user was specified
+        if not context.args:
+            await update.message.reply_text("❌ Please specify a user to revive!\nUsage: /revive @username or /revive firstname")
+            return
+        
+        target_input = " ".join(context.args).strip()
+        
+        # Remove @ if present
+        if target_input.startswith("@"):
+            target_input = target_input[1:]
+        
+        # Get all group members (including eliminated ones)
+        session = db.Session()
+        try:
+            from database_postgres import GroupMember, User
+            
+            # Find eliminated group members
+            eliminated_members = session.query(GroupMember, User).join(
+                User, GroupMember.user_id == User.user_id
+            ).filter(
+                GroupMember.chat_id == chat_id,
+                GroupMember.is_active == False
+            ).all()
+            
+            # Find the target user
+            target_user = None
+            for member, user_obj in eliminated_members:
+                if (user_obj.username and user_obj.username.lower() == target_input.lower()) or \
+                   (user_obj.first_name and user_obj.first_name.lower() == target_input.lower()) or \
+                   (user_obj.last_name and user_obj.last_name.lower() == target_input.lower()):
+                    target_user = (member.user_id, user_obj.username, user_obj.first_name, user_obj.last_name)
+                    break
+            
+            if not target_user:
+                await update.message.reply_text(f"❌ Eliminated user '{target_input}' not found in this group!")
+                return
+            
+            user_id, username, first_name, last_name = target_user
+            display_name = first_name if first_name else username
+            
+            # Revive the user (reactivate in group)
+            member = session.query(GroupMember).filter_by(
+                user_id=user_id, 
+                chat_id=chat_id
+            ).first()
+            
+            if member:
+                member.is_active = True
+                
+                # Also reactivate the user globally if needed
+                user_obj = session.query(User).filter_by(user_id=user_id).first()
+                if user_obj:
+                    user_obj.is_active = True
+                
+                session.commit()
+                
+                # Send confirmation message
+                await update.message.reply_text(f"🔥 **ADMIN REVIVAL**\n\n{display_name} has been brought back from the dead!\n\n✨ Welcome back to the competition, {display_name}! You've been given a second chance!")
+                
+                logger.info(f"Admin {user.username} revived user {display_name} ({user_id}) in group {chat_id}")
+            else:
+                await update.message.reply_text(f"❌ Could not find group membership for {display_name}")
+                
+        finally:
+            session.close()
+        
+    except Exception as e:
+        logger.error(f"Error in revive command: {e}")
+        await update.message.reply_text(f"❌ Error reviving user: {str(e)}")
+
 async def send_reminder_to_groups():
     """Send reminder message to all groups 24 hours before deadline"""
     try:
@@ -1227,6 +1371,8 @@ def main():
         ("round", round_info),
         ("debug", debug_user_status),  # Temporary debug command
         ("exportdata", export_data_to_logs),  # Temporary export command for migration
+        ("kill", kill_user),  # Admin-only elimination command
+        ("revive", revive_user),  # Admin-only revival command
     ]
     
     for command, handler in command_handlers:
