@@ -216,7 +216,103 @@ class FootballAPI:
         return None
     
     def get_current_gameweek(self, league_id=39, season=DEFAULT_SEASON):
-        """Get current gameweek information"""
+        """Get current gameweek information based on current date and Premier League schedule"""
+        from datetime import datetime, timedelta
+        
+        try:
+            # First, try to determine gameweek based on current date and known season structure
+            now = datetime.now()
+            
+            # Premier League 2024-25 season started August 17, 2024
+            # Premier League 2025-26 season starts August 15, 2025
+            if season == 2025:  # 2024-25 season
+                season_start = datetime(2024, 8, 17)
+            elif season == 2026:  # 2025-26 season  
+                season_start = datetime(2025, 8, 15)
+            else:
+                # For other seasons, try API approach as fallback
+                return self._get_gameweek_from_api(league_id, season)
+            
+            # Calculate weeks since season start
+            if now < season_start:
+                return 1  # Season hasn't started yet
+            
+            # More accurate gameweek calculation based on Premier League schedule
+            # Premier League typically has gameweeks every 7-10 days during the season
+            days_elapsed = (now - season_start).days
+            
+            # Calculate gameweek based on deadlines, not just days
+            # Check each gameweek's deadline to determine current gameweek
+            estimated_gameweek = 1
+            
+            # Define gameweek deadlines for 2025-26 season
+            gameweek_deadlines = {
+                1: datetime(2025, 8, 15, 18, 0, 0),  # GW1: Friday Aug 15, 6 PM
+                2: datetime(2025, 8, 22, 18, 0, 0),  # GW2: Friday Aug 22, 6 PM  
+                3: datetime(2025, 8, 29, 18, 0, 0),  # GW3: Friday Aug 29, 6 PM
+                4: datetime(2025, 9, 5, 18, 0, 0),   # GW4: Friday Sep 5, 6 PM
+            }
+            
+            # Find the current gameweek based on which deadline we're closest to
+            for gw in range(1, 39):  # Check all possible gameweeks
+                if gw in gameweek_deadlines:
+                    deadline = gameweek_deadlines[gw]
+                else:
+                    # For gameweeks beyond predefined ones, estimate weekly
+                    weeks_offset = gw - 1
+                    deadline = datetime(2025, 8, 15) + timedelta(weeks=weeks_offset)
+                    deadline = deadline.replace(hour=18, minute=0, second=0, microsecond=0)
+                    # Adjust to Friday
+                    days_to_friday = (4 - deadline.weekday()) % 7
+                    deadline += timedelta(days=days_to_friday)
+                
+                # If we haven't reached this gameweek's deadline yet, this is the current gameweek
+                if now <= deadline:
+                    estimated_gameweek = gw
+                    break
+                # If we've passed this deadline, we're in the next gameweek
+                else:
+                    estimated_gameweek = min(gw + 1, 38)
+                    # Continue to check if there are more gameweeks to process
+            
+            logger.info(f"Days since season start ({season_start.date()}): {days_elapsed}, estimated gameweek: {estimated_gameweek}")
+            
+            # Now verify this estimate by checking fixtures around this gameweek
+            for gw_check in range(max(1, estimated_gameweek - 1), min(39, estimated_gameweek + 3)):
+                fixtures = self.get_gameweek_fixtures(gw_check, league_id, season)
+                if fixtures:
+                    # Check if this gameweek is currently active or upcoming
+                    current_statuses = [f['status'] for f in fixtures]
+                    
+                    # If gameweek has matches that haven't started yet, or are in progress
+                    if any(status in ['NS', 'TBD', '1H', 'HT', '2H', 'ET', 'P', 'LIVE'] for status in current_statuses):
+                        # Check if deadline has passed for this gameweek
+                        deadline = self.get_gameweek_deadline(gw_check, league_id, season)
+                        if deadline and now <= deadline:
+                            # We're before the deadline, this is the current gameweek for picks
+                            logger.info(f"Current gameweek for picks: {gw_check} (deadline: {deadline})")
+                            return gw_check
+                        elif deadline and now > deadline:
+                            # Past deadline but matches ongoing/upcoming - still current gameweek
+                            if any(status in ['NS', 'TBD', '1H', 'HT', '2H', 'ET', 'P', 'LIVE'] for status in current_statuses):
+                                logger.info(f"Current gameweek (past deadline): {gw_check}")
+                                return gw_check
+                    
+                    # If all matches are finished, check next gameweek
+                    if all(status == 'FT' for status in current_statuses):
+                        continue
+            
+            # Fallback to estimated gameweek if API checks don't give clear answer
+            logger.info(f"Using estimated gameweek: {estimated_gameweek}")
+            return estimated_gameweek
+            
+        except Exception as e:
+            logger.warning(f"Error in date-based gameweek calculation: {e}")
+            # Fallback to API-based approach
+            return self._get_gameweek_from_api(league_id, season)
+    
+    def _get_gameweek_from_api(self, league_id=39, season=DEFAULT_SEASON):
+        """Fallback method to get gameweek from API"""
         try:
             url = f"{self.base_url}/fixtures"
             params = {
@@ -242,7 +338,7 @@ class FootballAPI:
             return 1  # Default to gameweek 1 if can't determine
             
         except Exception as e:
-            logger.warning(f"Error getting current gameweek: {e}")
+            logger.warning(f"Error getting gameweek from API: {e}")
             return 1
     
     def get_gameweek_fixtures(self, gameweek, league_id=39, season=DEFAULT_SEASON):
@@ -391,12 +487,34 @@ class FootballAPI:
                 today = datetime.now()
                 
                 # Special handling for 2025-26 season start
-                if season == 2026 and gameweek == 1:
-                    # 2025-26 Premier League season starts Friday August 15th, 2025
-                    # First matches typically kick off at 8:00 PM, so deadline is 6:00 PM
-                    season_start = datetime(2025, 8, 15, 18, 0, 0)  # Friday 6 PM deadline
-                    logger.info(f"Using known 2025-26 season start deadline: {season_start}")
-                    return season_start
+                if season == 2026:
+                    season_start_date = datetime(2025, 8, 15)
+                    days_since_start = (today - season_start_date).days
+                    
+                    # Calculate deadline based on gameweek and typical Premier League schedule
+                    if gameweek == 1:
+                        # GW1: August 15, 2025 (Friday 6 PM deadline)
+                        deadline = datetime(2025, 8, 15, 18, 0, 0)
+                    elif gameweek == 2:
+                        # GW2: August 22, 2025 (Friday 6 PM deadline)
+                        deadline = datetime(2025, 8, 22, 18, 0, 0)
+                    elif gameweek == 3:
+                        # GW3: August 29, 2025 (Friday 6 PM deadline)
+                        deadline = datetime(2025, 8, 29, 18, 0, 0)
+                    elif gameweek == 4:
+                        # GW4: September 5, 2025 (Friday 6 PM deadline)
+                        deadline = datetime(2025, 9, 5, 18, 0, 0)
+                    else:
+                        # For later gameweeks, estimate based on weekly schedule
+                        weeks_offset = gameweek - 1
+                        deadline = season_start_date + timedelta(weeks=weeks_offset)
+                        deadline = deadline.replace(hour=18, minute=0, second=0, microsecond=0)
+                        # Adjust to Friday if not already
+                        days_to_friday = (4 - deadline.weekday()) % 7
+                        deadline += timedelta(days=days_to_friday)
+                    
+                    logger.info(f"Using calculated 2025-26 season deadline for GW{gameweek}: {deadline}")
+                    return deadline
                 
                 # General fallback for other gameweeks
                 # Premier League gameweeks typically start on weekends, but can vary:
