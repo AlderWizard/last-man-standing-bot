@@ -216,100 +216,90 @@ class FootballAPI:
         return None
     
     def get_current_gameweek(self, league_id=39, season=DEFAULT_SEASON):
-        """Get current gameweek information based on current date and Premier League schedule"""
-        from datetime import datetime, timedelta
-        
+        """Get current gameweek information from FPL API"""
         try:
-            # First, try to determine gameweek based on current date and known season structure
-            now = datetime.now()
+            # Use FPL API for gameweek detection
+            current_gw, gw_data = self._get_fpl_current_gameweek(season)
+            if current_gw:
+                logger.info(f"FPL API returned current gameweek: {current_gw}")
+                return current_gw
             
-            # Premier League 2024-25 season started August 17, 2024
-            # Premier League 2025-26 season starts August 15, 2025
-            if season == 2025:  # 2024-25 season
-                season_start = datetime(2024, 8, 17)
-            elif season == 2026:  # 2025-26 season  
-                season_start = datetime(2025, 8, 15)
-            else:
-                # For other seasons, try API approach as fallback
-                return self._get_gameweek_from_api(league_id, season)
-            
-            # Calculate weeks since season start
-            if now < season_start:
-                return 1  # Season hasn't started yet
-            
-            # More accurate gameweek calculation based on Premier League schedule
-            # Premier League typically has gameweeks every 7-10 days during the season
-            days_elapsed = (now - season_start).days
-            
-            # Calculate gameweek based on deadlines, not just days
-            # Check each gameweek's deadline to determine current gameweek
-            estimated_gameweek = 1
-            
-            # Define gameweek deadlines for 2025-26 season
-            gameweek_deadlines = {
-                1: datetime(2025, 8, 15, 18, 0, 0),  # GW1: Friday Aug 15, 6 PM
-                2: datetime(2025, 8, 22, 18, 0, 0),  # GW2: Friday Aug 22, 6 PM  
-                3: datetime(2025, 8, 29, 18, 0, 0),  # GW3: Friday Aug 29, 6 PM
-                4: datetime(2025, 9, 5, 18, 0, 0),   # GW4: Friday Sep 5, 6 PM
-            }
-            
-            # Find the current gameweek based on which deadline we're closest to
-            for gw in range(1, 39):  # Check all possible gameweeks
-                if gw in gameweek_deadlines:
-                    deadline = gameweek_deadlines[gw]
-                else:
-                    # For gameweeks beyond predefined ones, estimate weekly
-                    weeks_offset = gw - 1
-                    deadline = datetime(2025, 8, 15) + timedelta(weeks=weeks_offset)
-                    deadline = deadline.replace(hour=18, minute=0, second=0, microsecond=0)
-                    # Adjust to Friday
-                    days_to_friday = (4 - deadline.weekday()) % 7
-                    deadline += timedelta(days=days_to_friday)
-                
-                # If we haven't reached this gameweek's deadline yet, this is the current gameweek
-                if now <= deadline:
-                    estimated_gameweek = gw
-                    break
-                # If we've passed this deadline, we're in the next gameweek
-                else:
-                    estimated_gameweek = min(gw + 1, 38)
-                    # Continue to check if there are more gameweeks to process
-            
-            logger.info(f"Days since season start ({season_start.date()}): {days_elapsed}, estimated gameweek: {estimated_gameweek}")
-            
-            # Now verify this estimate by checking fixtures around this gameweek
-            for gw_check in range(max(1, estimated_gameweek - 1), min(39, estimated_gameweek + 3)):
-                fixtures = self.get_gameweek_fixtures(gw_check, league_id, season)
-                if fixtures:
-                    # Check if this gameweek is currently active or upcoming
-                    current_statuses = [f['status'] for f in fixtures]
-                    
-                    # If gameweek has matches that haven't started yet, or are in progress
-                    if any(status in ['NS', 'TBD', '1H', 'HT', '2H', 'ET', 'P', 'LIVE'] for status in current_statuses):
-                        # Check if deadline has passed for this gameweek
-                        deadline = self.get_gameweek_deadline(gw_check, league_id, season)
-                        if deadline and now <= deadline:
-                            # We're before the deadline, this is the current gameweek for picks
-                            logger.info(f"Current gameweek for picks: {gw_check} (deadline: {deadline})")
-                            return gw_check
-                        elif deadline and now > deadline:
-                            # Past deadline but matches ongoing/upcoming - still current gameweek
-                            if any(status in ['NS', 'TBD', '1H', 'HT', '2H', 'ET', 'P', 'LIVE'] for status in current_statuses):
-                                logger.info(f"Current gameweek (past deadline): {gw_check}")
-                                return gw_check
-                    
-                    # If all matches are finished, check next gameweek
-                    if all(status == 'FT' for status in current_statuses):
-                        continue
-            
-            # Fallback to estimated gameweek if API checks don't give clear answer
-            logger.info(f"Using estimated gameweek: {estimated_gameweek}")
-            return estimated_gameweek
+            raise ValueError("FPL API did not return a valid gameweek")
             
         except Exception as e:
-            logger.warning(f"Error in date-based gameweek calculation: {e}")
-            # Fallback to API-based approach
-            return self._get_gameweek_from_api(league_id, season)
+            logger.error(f"Error getting current gameweek from FPL API: {e}")
+            raise RuntimeError("Failed to determine current gameweek - FPL API is unavailable")
+    
+    def _get_fpl_current_gameweek(self, season=None):
+        """Get current gameweek from FPL API with improved gameweek transition handling"""
+        try:
+            import requests
+            from datetime import datetime, timezone, timedelta
+            
+            # Get current date in UTC
+            now = datetime.now(timezone.utc)
+            
+            # Try to get data from FPL API
+            response = requests.get(
+                "https://fantasy.premierleague.com/api/bootstrap-static/",
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'events' not in data:
+                raise ValueError("No events in FPL API response")
+            
+            # Sort all events by ID to ensure correct order
+            all_events = sorted(data['events'], key=lambda x: x['id'])
+            
+            # Add datetime objects for each event's deadline
+            for event in all_events:
+                event['deadline_dt'] = datetime.fromisoformat(
+                    event['deadline_time'].replace('Z', '+00:00')
+                ).replace(tzinfo=timezone.utc)
+            
+            # Find the next upcoming deadline
+            upcoming_events = [e for e in all_events if e['deadline_dt'] > now]
+            next_upcoming = min(upcoming_events, key=lambda x: x['deadline_dt']) if upcoming_events else None
+            
+            # Determine the current gameweek
+            if next_upcoming:
+                # If there's an upcoming deadline, that's the current gameweek
+                return next_upcoming['id'], next_upcoming
+            elif all_events:
+                # If no upcoming deadlines, return the most recent gameweek
+                return all_events[-1]['id'], all_events[-1]
+            
+            raise ValueError("No valid gameweeks found in FPL API")
+            
+        except Exception as e:
+            logger.error(f"Error in _get_fpl_current_gameweek: {e}")
+            raise RuntimeError(f"Failed to get current gameweek from FPL API: {e}")
+    
+    def _get_gameweek_fallback(self, season):
+        """Fallback gameweek calculation based on date"""
+        from datetime import datetime, timedelta
+        
+        now = datetime.now()
+        
+        # Season start dates
+        if season == 2025:  # 2024-25 season
+            season_start = datetime(2024, 8, 17)
+        elif season == 2026:  # 2025-26 season  
+            season_start = datetime(2025, 8, 15)
+        else:
+            return 1  # Default fallback
+        
+        if now < season_start:
+            return 1
+        
+        # Simple weekly calculation
+        days_elapsed = (now - season_start).days
+        estimated_gameweek = min((days_elapsed // 7) + 1, 38)
+        
+        logger.info(f"Fallback calculation: GW{estimated_gameweek}")
+        return estimated_gameweek
     
     def _get_gameweek_from_api(self, league_id=39, season=DEFAULT_SEASON):
         """Fallback method to get gameweek from API"""
@@ -454,7 +444,50 @@ class FootballAPI:
             return []
 
     def get_gameweek_deadline(self, gameweek, league_id=39, season=DEFAULT_SEASON):
-        """Get pick deadline for gameweek (2 hours before first match)"""
+        """Get pick deadline for gameweek from FPL API"""
+        from datetime import datetime, timedelta
+        
+        # First try FPL API for accurate deadline
+        deadline = self._get_fpl_gameweek_deadline(gameweek)
+        if deadline:
+            logger.info(f"FPL API deadline for GW{gameweek}: {deadline}")
+            return deadline
+        
+        # Fallback to fixture-based calculation
+        logger.warning(f"FPL API failed for GW{gameweek} deadline, using fixture fallback")
+        return self._get_deadline_fallback(gameweek, league_id, season)
+    
+    def _get_fpl_gameweek_deadline(self, gameweek):
+        """Get deadline from FPL API"""
+        try:
+            import requests
+            from datetime import datetime
+            response = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/", timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'events' not in data:
+                return None
+            
+            for event in data['events']:
+                if event['id'] == gameweek and event.get('deadline_time'):
+                    try:
+                        deadline_str = event['deadline_time'].replace('Z', '+00:00')
+                        deadline = datetime.fromisoformat(deadline_str)
+                        # Convert to local time (remove timezone info for consistency)
+                        return deadline.replace(tzinfo=None)
+                    except Exception as e:
+                        logger.error(f"Error parsing FPL deadline for GW{gameweek}: {e}")
+                        return None
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching FPL deadline for GW{gameweek}: {e}")
+            return None
+    
+    def _get_deadline_fallback(self, gameweek, league_id, season):
+        """Fallback deadline calculation"""
         from datetime import datetime, timedelta
         
         def get_emergency_fallback_deadline():
@@ -464,16 +497,16 @@ class FootballAPI:
             # Special handling for 2025-26 season start
             if season == 2026 and gameweek == 1:
                 # 2025-26 Premier League season starts Friday August 15th, 2025
-                season_start = datetime(2025, 8, 15, 18, 0, 0)  # Friday 6 PM deadline
+                season_start = datetime(2025, 8, 15, 17, 30, 0)  # Friday 5:30 PM (FPL actual deadline)
                 logger.info(f"Using emergency fallback for 2025-26 season start: {season_start}")
                 return season_start
             
-            # General emergency fallback - next Friday 6 PM
+            # General emergency fallback - next Friday 5:30 PM (typical FPL deadline)
             days_until_friday = (4 - today.weekday()) % 7
-            if days_until_friday == 0 and today.hour >= 18:  # If it's Friday after 6 PM
+            if days_until_friday == 0 and today.hour >= 17:  # If it's Friday after 5:30 PM
                 days_until_friday = 7  # Next Friday
             emergency_deadline = today + timedelta(days=days_until_friday)
-            emergency_deadline = emergency_deadline.replace(hour=18, minute=0, second=0, microsecond=0)
+            emergency_deadline = emergency_deadline.replace(hour=17, minute=30, second=0, microsecond=0)
             
             logger.warning(f"Using emergency fallback deadline for gameweek {gameweek}: {emergency_deadline}")
             return emergency_deadline
