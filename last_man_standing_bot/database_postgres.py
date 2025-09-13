@@ -142,11 +142,46 @@ class DatabasePostgres:
     def init_database(self):
         """Initialize the database with required tables"""
         try:
+            # Create all tables defined in SQLAlchemy models
             Base.metadata.create_all(self.engine)
-            logger.info("Database tables created successfully")
+            
+            # Check if we're using SQLite
+            if 'sqlite' in str(self.engine.url):
+                self._migrate_sqlite_schema()
+                
+            logger.info("Database tables created/verified successfully")
         except Exception as e:
-            logger.error(f"Error creating database tables: {e}")
+            logger.error(f"Error initializing database: {e}")
             raise
+            
+    def _migrate_sqlite_schema(self):
+        """Handle SQLite-specific schema migrations"""
+        from sqlalchemy import inspect
+        
+        inspector = inspect(self.engine)
+        existing_tables = inspector.get_table_names()
+        
+        if 'users' in existing_tables:
+            # Check if first_name column exists in users table
+            users_columns = [col['name'] for col in inspector.get_columns('users')]
+            
+            if 'first_name' not in users_columns:
+                with self.engine.connect() as conn:
+                    try:
+                        conn.execute(text('ALTER TABLE users ADD COLUMN first_name TEXT'))
+                        conn.commit()
+                        logger.info("Added first_name column to users table")
+                    except Exception as e:
+                        logger.warning(f"Could not add first_name column: {e}")
+                        
+            if 'last_name' not in users_columns:
+                with self.engine.connect() as conn:
+                    try:
+                        conn.execute(text('ALTER TABLE users ADD COLUMN last_name TEXT'))
+                        conn.commit()
+                        logger.info("Added last_name column to users table")
+                    except Exception as e:
+                        logger.warning(f"Could not add last_name column: {e}")
     
     def add_user(self, user_id: int, username: str = None, first_name: str = None, last_name: str = None):
         """Add a new user to the database"""
