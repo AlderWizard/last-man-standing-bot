@@ -123,6 +123,20 @@ def get_current_gameweek():
         return 1  # Fallback to gameweek 1
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def get_season():
+    """Get the current season in YYYY-YY format"""
+    import datetime
+    now = datetime.datetime.now()
+    # If month is before July, it's the second half of the season
+    if now.month < 7:
+        return f"{now.year-1}-{str(now.year)[2:]}"
+    else:
+        return f"{now.year}-{str(now.year+1)[2:]}"
+
+# ============================================================================
 # TELEGRAM COMMAND HANDLERS
 # ============================================================================
 
@@ -1553,7 +1567,7 @@ def main():
     
     logger.info("Initializing Last Man Standing bot...")
     
-    # Initialize core components
+    # Initialize database and core components
     db = Database()
     football_api = FootballAPI()
     
@@ -1575,15 +1589,6 @@ def main():
         keep_alive_thread = threading.Thread(target=continuous_keep_alive, daemon=True)
         keep_alive_thread.start()
         logger.info("Continuous keep-alive monitor started")
-    
-    # Initialize database and other core components
-    db = Database()
-    football_api = FootballAPI()
-    
-    # Create Telegram application
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
-    # Initialize lifeline manager and store it in bot_data
     lifeline_manager = LifelineManager(db.engine)
     application.bot_data['lifeline_manager'] = lifeline_manager
     
