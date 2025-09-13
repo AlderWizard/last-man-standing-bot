@@ -1011,16 +1011,18 @@ async def lifelines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
         
-        if not hasattr(context.bot_data, 'lifeline_manager'):
+        # Get lifeline manager
+        if 'lifeline_manager' not in context.bot_data or context.bot_data['lifeline_manager'] is None:
             await update.message.reply_text("❌ Lifelines are not properly initialized. Please contact the bot administrator.")
             return
-            
+        
+        lifeline_manager = context.bot_data['lifeline_manager']
         league_id = "global"
         season = get_season()
         
         try:
             # Get available lifelines
-            lifelines = context.bot_data.lifeline_manager.get_available_lifelines(chat_id, user_id, league_id, season)
+            lifelines = lifeline_manager.get_available_lifelines(chat_id, user_id, league_id, season)
             
             # Get used lifelines
             used_lifelines = []
