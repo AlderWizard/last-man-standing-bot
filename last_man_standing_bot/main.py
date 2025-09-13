@@ -53,18 +53,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize core components
-db = Database()
-football_api = FootballAPI()
+db = None
+football_api = None
+lifeline_manager = None
 
 # ============================================================================
 # GLOBAL VARIABLES AND CONSTANTS
 # ============================================================================
 
 # Global application instance for background tasks
-application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-# Initialize lifeline manager and store it in bot_data
-application.bot_data['lifeline_manager'] = LifelineManager(db.engine)
+application = None
 
 # ============================================================================
 # ROAST MESSAGE CONSTANTS
@@ -1480,15 +1478,85 @@ def run_health_server():
         logger.error(f"Failed to start health server: {e}")
         raise
 
+async def debug_picks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug command to check pick-related issues"""
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+    
+    response = f"🔍 *Debugging Picks* 🔍\n\n"
+    
+    # Check if user exists in database
+    user_data = db.get_user(user.id)
+    if not user_data:
+        response += "❌ *User not found in database*\n"
+    else:
+        response += f"✅ *User found in database* (ID: {user.id})\n"
+    
+    # Check if chat exists in database
+    session = db.Session()
+    chat_exists = session.query(Group).filter_by(chat_id=chat_id).first() is not None
+    session.close()
+    
+    if not chat_exists:
+        response += "❌ *Chat/Group not found in database*\n"
+    else:
+        response += f"✅ *Chat/Group found in database* (ID: {chat_id})\n"
+    
+    # Check user's picks
+    picks = db.get_user_picks(user_id=user.id, chat_id=chat_id)
+    
+    if not picks:
+        response += "\n❌ *No picks found* for your account in this chat.\n"
+        
+        # Check if there are any picks in the database at all
+        session = db.Session()
+        all_picks = session.query(Pick).filter_by(chat_id=chat_id).all()
+        session.close()
+        
+        if all_picks:
+            response += f"\nℹ️ Found {len(all_picks)} picks in this chat for other users.\n"
+            
+            # Check if user has picks in other chats
+            user_picks_elsewhere = db.get_user_picks(user_id=user.id)
+            if user_picks_elsewhere:
+                response += f"\nℹ️ You have {len(user_picks_elsewhere)} picks in other chats.\n"
+    else:
+        response += f"\n✅ *Found {len(picks)} picks* in this chat.\n\n"
+        response += "*Your Picks:*\n"
+        for round_num, team, result in picks:
+            status_emoji = {"win": "✅", "loss": "❌", "draw": "🟡", "pending": "⏳"}
+            emoji = status_emoji.get(result, "❓")
+            response += f"• Round {round_num}: {team} {emoji}\n"
+    
+    # Add database connection info
+    response += "\n*Database Info:*\n"
+    if hasattr(db, 'engine') and db.engine:
+        response += f"• Database: {db.engine.url.database}\n"
+    else:
+        response += "• Database connection not properly initialized\n"
+    
+    await update.message.reply_text(response, parse_mode='Markdown')
+
 # ============================================================================
 # MAIN APPLICATION
 # ============================================================================
 
 def main():
-    """Initialize and start the Last Man Standing Telegram bot."""
-    global application
+    """Initialize and start the Last Man Standing bot."""
+    global application, db, football_api, lifeline_manager
     
     logger.info("Initializing Last Man Standing bot...")
+    
+    # Initialize core components
+    db = Database()
+    football_api = FootballAPI()
+    
+    # Create Telegram application
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Initialize lifeline manager and store it in bot_data
+    lifeline_manager = LifelineManager(db.engine)
+    application.bot_data['lifeline_manager'] = lifeline_manager
     
     # Start health check server for Render (if PORT is set)
     if os.environ.get('PORT'):
@@ -1505,11 +1573,11 @@ def main():
     # Create Telegram application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Initialize database and lifeline manager
-    db = Database()
-    lifeline_manager = LifelineManager(db.engine)
+    # Initialize database
+    global db, lifeline_manager
     
-    # Store the lifeline manager in bot_data for command handlers to access
+    # Initialize lifeline manager and store it in bot_data
+    lifeline_manager = LifelineManager(db.engine)
     application.bot_data['lifeline_manager'] = lifeline_manager
     
     # Register command handlers
@@ -1524,7 +1592,8 @@ def main():
         ("pot", pot),
         ("rollover", rollover),
         ("round", round_info),
-        ("debug", debug_user_status),  # Temporary debug command
+        ("debug", debug_user_status),  # Debug command
+        ("debug_picks", debug_picks),  # Debug picks command
         ("exportdata", export_data_to_logs),  # Temporary export command for migration
         ("kill", kill_user),  # Admin-only elimination command
         ("revive", revive_user),  # Admin-only revival command
