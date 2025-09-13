@@ -20,6 +20,7 @@ import random
 import re
 import threading
 import traceback
+import schedule
 from datetime import datetime, timedelta
 from sqlalchemy import text
 import os
@@ -999,89 +1000,92 @@ async def roast_eliminated_users(eliminated_users, gameweek, chat_id, all_elimin
     except Exception as e:
         logging.error(f"Error in roast_eliminated_users: {e}")
 
-def get_season():
-    """Get current season in YYYY-YY format"""
-    now = datetime.now()
-    if now.month >= 8:  # August or later
-        return f"{now.year}-{str(now.year + 1)[2:]}"
-    else:
-        return f"{now.year - 1}-{str(now.year)[2:]}"
-
 async def lifelines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show available and used lifelines with details"""
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    
-    # For now, we'll use a default league ID since the command is user-specific
-    league_id = "global"
-    season = get_season()
-    
-    # Get available lifelines
-    lifelines = lifeline_manager.get_available_lifelines(chat_id, user_id, league_id, season)
-    
-    # Import SQLAlchemy text
-    from sqlalchemy import text
-    
-    # Get used lifelines from the database
-    with db.engine.connect() as conn:
-        stmt = text('''
-            SELECT lifeline_type, used_at, target_user_id, details
-            FROM lifeline_usage
-            WHERE chat_id = :chat_id AND user_id = :user_id AND league_id = :league_id AND season = :season
-            ORDER BY used_at DESC
-        ''')
-        result = conn.execute(
-            stmt,
-            {
-                'chat_id': chat_id,
-                'user_id': user_id,
-                'league_id': league_id,
-                'season': season
-            }
-        )
-        used_lifelines = result.fetchall()
-    
-    response = "🎮 *Your Lifelines* 🎮\n\n"
-    
-    # Show available lifelines
-    response += "*Available Lifelines:*\n"
-    if lifelines:
-        for lifeline_id, lifeline in lifelines.items():
-            status = "✅ Available" if lifeline['remaining'] > 0 else "❌ Used up"
-            response += (
-                f"• *{lifeline['name']}* - {status}\n"
-                f"  {lifeline.get('description', '')}\n"
-                f"  Uses left: {lifeline['remaining']}/{lifeline['total_allowed']}\n\n"
-            )
-    else:
-        response += "No lifelines available for this season.\n\n"
-    
-    # Show used lifelines
-    if used_lifelines:
-        response += "\n*Used Lifelines:*\n"
-        for lifeline in used_lifelines:
-            lifeline_type, used_at, target_id, details = lifeline
-            lifeline_info = {
-                'coinflip': {'name': 'Coinflip', 'description': '50% chance to revive in current round'},
-                'goodluck': {'name': 'Good Luck', 'description': 'Force user to pick from bottom 6 teams'},
-                'forcechange': {'name': 'Force Change', 'description': 'Force user to change their team'}
-            }.get(lifeline_type, {'name': lifeline_type.title(), 'description': 'No description available'})
+    try:
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        
+        if not hasattr(context.bot_data, 'lifeline_manager'):
+            await update.message.reply_text("❌ Lifelines are not properly initialized. Please contact the bot administrator.")
+            return
             
-            used_time = used_at.strftime('%Y-%m-%d %H:%M')
-            target_info = f" on user {target_id}" if target_id else ""
-            details_info = f" ({details})" if details else ""
+        league_id = "global"
+        season = get_season()
+        
+        try:
+            # Get available lifelines
+            lifelines = context.bot_data.lifeline_manager.get_available_lifelines(chat_id, user_id, league_id, season)
             
-            response += (
-                f"• *{lifeline_info['name']}* - Used {used_time}{target_info}{details_info}\n"
-            )
-    
-    # Add usage instructions
-    response += "\n💡 *How to use lifelines:*\n"
-    response += "• `/uselifeline coinflip` - 50/50 chance to revive in current round\n"
-    response += "• `/uselifeline goodluck @username` - Force user to pick from bottom 6 teams\n"
-    response += "• `/uselifeline forcechange @username` - Force user to change their team"
-    
-    await update.message.reply_text(response, parse_mode='Markdown')
+            # Get used lifelines
+            used_lifelines = []
+            with db.engine.connect() as conn:
+                result = conn.execute(text('''
+                    SELECT lifeline_type, used_at, target_user_id, details
+                    FROM lifeline_usage
+                    WHERE chat_id = :chat_id 
+                    AND user_id = :user_id 
+                    AND league_id = :league_id 
+                    AND season = :season
+                    ORDER BY used_at DESC
+                '''), {
+                    'chat_id': chat_id,
+                    'user_id': user_id,
+                    'league_id': league_id,
+                    'season': season
+                })
+                used_lifelines = result.fetchall()
+            
+            # Build response
+            response = "🎮 *Your Lifelines* 🎮\n\n"
+            
+            # Show available lifelines
+            response += "*Available Lifelines:*\n"
+            if lifelines:
+                for lifeline_id, lifeline in lifelines.items():
+                    status = "✅ Available" if lifeline['remaining'] > 0 else "❌ Used up"
+                    response += (
+                        f"• *{lifeline['name']}* - {status}\n"
+                        f"  {lifeline['description']}\n"
+                        f"  Uses left: {lifeline['remaining']}/{lifeline['total_allowed']}\n\n"
+                    )
+            else:
+                response += "No lifelines available for this season.\n\n"
+            
+            # Show used lifelines
+            if used_lifelines:
+                response += "\n*Used Lifelines:*\n"
+                for lifeline in used_lifelines:
+                    lifeline_type, used_at, target_id, details = lifeline
+                    lifeline_info = {
+                        'coinflip': {'name': 'Coinflip', 'description': '50% chance to revive in current round'},
+                        'goodluck': {'name': 'Good Luck', 'description': 'Forced opponent to pick from bottom 6'},
+                        'forcechange': {'name': 'Force Change', 'description': 'Forced opponent to change their pick'}
+                    }.get(lifeline_type, {'name': lifeline_type, 'description': ''})
+                    
+                    used_time = used_at.strftime("%Y-%m-%d %H:%M")
+                    target_info = f" on <user>{target_id}</user>" if target_id else ""
+                    details_text = f"\n   - {details}" if details else ""
+                    
+                    response += (
+                        f"• *{lifeline_info['name']}* (Used: {used_time}{target_info}){details_text}\n"
+                    )
+            
+            # Add usage instructions
+            response += "\n💡 *How to use lifelines:*\n"
+            response += "• `/uselifeline coinflip` - 50/50 chance to revive in current round\n"
+            response += "• `/uselifeline goodluck @username` - Force user to pick from bottom 6 teams\n"
+            response += "• `/uselifeline forcechange @username` - Force user to change their team"
+            
+            await update.message.reply_text(response, parse_mode='Markdown')
+            
+        except Exception as e:
+            logger.error(f"Error in lifelines command: {e}")
+            await update.message.reply_text("❌ An error occurred while retrieving lifelines. Please try again later.")
+            
+    except Exception as e:
+        logger.error(f"Error in lifelines command: {e}")
+        await update.message.reply_text("❌ An error occurred. Please try again later.")
 
 async def use_lifeline_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Use a lifeline"""
@@ -1497,6 +1501,13 @@ def main():
     
     # Create Telegram application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Initialize database and lifeline manager
+    db = Database()
+    lifeline_manager = LifelineManager(db.engine)
+    
+    # Store the lifeline manager in bot_data for command handlers to access
+    application.bot_data['lifeline_manager'] = lifeline_manager
     
     # Register command handlers
     command_handlers = [

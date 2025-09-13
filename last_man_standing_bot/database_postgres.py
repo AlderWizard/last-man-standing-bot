@@ -105,39 +105,43 @@ class DatabasePostgres:
         """Initialize lifelines-related tables"""
         from sqlalchemy import text
         
-        with self.engine.connect() as conn:
-            # Lifeline usage tracking
-            conn.execute(text('''
-                CREATE TABLE IF NOT EXISTS lifeline_usage (
-                    id SERIAL PRIMARY KEY,
-                    chat_id BIGINT NOT NULL,
-                    user_id BIGINT NOT NULL,
-                    league_id TEXT NOT NULL,
-                    lifeline_type TEXT NOT NULL,
-                    season TEXT NOT NULL,
-                    used_at TIMESTAMP NOT NULL,
-                    target_user_id BIGINT,
-                    details TEXT,
-                    UNIQUE(chat_id, user_id, league_id, season, lifeline_type)
-                )
-            '''))
-            
-            # Track team assignments when Force Change is used
-            conn.execute(text('''
-                CREATE TABLE IF NOT EXISTS force_changes (
-                    id SERIAL PRIMARY KEY,
-                    chat_id BIGINT NOT NULL,
-                    user_id BIGINT NOT NULL,
-                    league_id TEXT NOT NULL,
-                    original_team TEXT NOT NULL,
-                    new_team TEXT,
-                    gameweek INTEGER NOT NULL,
-                    used_at TIMESTAMP NOT NULL,
-                    season TEXT NOT NULL,
-                    target_user_id BIGINT
-                )
-            '''))
-            conn.commit()
+        try:
+            with self.engine.connect() as conn:
+                # Create lifeline_usage table if it doesn't exist
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS lifeline_usage (
+                        id SERIAL PRIMARY KEY,
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        league_id TEXT NOT NULL,
+                        lifeline_type TEXT NOT NULL,
+                        season TEXT NOT NULL,
+                        used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        target_user_id BIGINT,
+                        details TEXT,
+                        UNIQUE(chat_id, user_id, league_id, season, lifeline_type)
+                    )
+                '''))
+                
+                # Create force_changes table if it doesn't exist
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS force_changes (
+                        id SERIAL PRIMARY KEY,
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        league_id TEXT NOT NULL,
+                        original_team TEXT NOT NULL,
+                        new_team TEXT,
+                        gameweek INTEGER NOT NULL,
+                        used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        season TEXT NOT NULL,
+                        target_user_id BIGINT
+                    )
+                '''))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error initializing lifelines tables: {e}")
+            raise
     
     def init_database(self):
         """Initialize the database with required tables"""
