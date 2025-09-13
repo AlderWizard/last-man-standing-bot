@@ -103,9 +103,11 @@ class DatabasePostgres:
     
     def _init_lifelines_tables(self):
         """Initialize lifelines-related tables"""
+        from sqlalchemy import text
+        
         with self.engine.connect() as conn:
             # Lifeline usage tracking
-            conn.execute('''
+            conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS lifeline_usage (
                     id SERIAL PRIMARY KEY,
                     chat_id BIGINT NOT NULL,
@@ -118,10 +120,10 @@ class DatabasePostgres:
                     details TEXT,
                     UNIQUE(chat_id, user_id, league_id, season, lifeline_type)
                 )
-            ''')
+            '''))
             
             # Track team assignments when Force Change is used
-            conn.execute('''
+            conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS force_changes (
                     id SERIAL PRIMARY KEY,
                     chat_id BIGINT NOT NULL,
@@ -134,7 +136,7 @@ class DatabasePostgres:
                     season TEXT NOT NULL,
                     target_user_id BIGINT
                 )
-            ''')
+            '''))
             conn.commit()
     
     def init_database(self):
