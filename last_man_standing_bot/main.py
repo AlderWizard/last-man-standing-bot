@@ -17,10 +17,12 @@ Version: 2.0 - Multi-Group Support
 import asyncio
 import logging
 import random
-import schedule
-import threading
-import time
+import logging
+import os
+import re
+import traceback
 from datetime import datetime, timedelta
+from sqlalchemy import text
 import os
 import requests
 
@@ -281,7 +283,13 @@ async def pick_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def my_picks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user's pick history"""
     user = update.effective_user
-    picks = db.get_user_picks(user.id)
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    
+    if not chat_id:
+        await update.message.reply_text("❌ Error: Could not determine chat ID. Please try again in a group chat.")
+        return
+        
+    picks = db.get_user_picks(user_id=user.id, chat_id=chat_id)
     
     if not picks:
         await update.message.reply_text("You haven't made any picks yet!")
@@ -1012,6 +1020,9 @@ async def lifelines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get available lifelines
     lifelines = lifeline_manager.get_available_lifelines(chat_id, user_id, league_id, season)
     
+    # Import SQLAlchemy text
+    from sqlalchemy import text
+    
     # Get used lifelines from the database
     with db.engine.connect() as conn:
         stmt = text('''
@@ -1022,10 +1033,12 @@ async def lifelines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ''')
         result = conn.execute(
             stmt,
-            chat_id=chat_id,
-            user_id=user_id,
-            league_id=league_id,
-            season=season
+            {
+                'chat_id': chat_id,
+                'user_id': user_id,
+                'league_id': league_id,
+                'season': season
+            }
         )
         used_lifelines = result.fetchall()
     
