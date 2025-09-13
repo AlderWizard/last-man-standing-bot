@@ -31,9 +31,16 @@ import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Local imports
-from config import TELEGRAM_BOT_TOKEN, DEFAULT_LEAGUE
-from database_postgres import DatabasePostgres as Database
-from football_api import FootballAPI
+import os
+import sys
+
+# Add the parent directory to the path to allow importing config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from last_man_standing_bot.config import TELEGRAM_BOT_TOKEN, DEFAULT_LEAGUE
+from last_man_standing_bot.database_postgres import DatabasePostgres as Database
+from last_man_standing_bot.football_api import FootballAPI
+from last_man_standing_bot.lifelines import LifelineManager
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +52,7 @@ logger = logging.getLogger(__name__)
 # Initialize core components
 db = Database()
 football_api = FootballAPI()
+lifeline_manager = LifelineManager(db.engine)
 
 # ============================================================================
 # GLOBAL VARIABLES AND CONSTANTS
@@ -984,6 +992,123 @@ async def roast_eliminated_users(eliminated_users, gameweek, chat_id, all_elimin
     except Exception as e:
         logging.error(f"Error in roast_eliminated_users: {e}")
 
+def get_season():
+    """Get current season in YYYY-YY format"""
+    now = datetime.now()
+    if now.month >= 8:  # August or later
+        return f"{now.year}-{str(now.year + 1)[2:]}"
+    else:
+        return f"{now.year - 1}-{str(now.year)[2:]}"
+
+async def lifelines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show available and used lifelines with details"""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    
+    # For now, we'll use a default league ID since the command is user-specific
+    league_id = "global"
+    season = get_season()
+    
+    # Get available lifelines
+    lifelines = lifeline_manager.get_available_lifelines(chat_id, user_id, league_id, season)
+    
+    # Get used lifelines from the database
+    with db.engine.connect() as conn:
+        result = conn.execute(
+            '''
+            SELECT lifeline_type, used_at, target_user_id, details
+            FROM lifeline_usage
+            WHERE chat_id = %s AND user_id = %s AND league_id = %s AND season = %s
+            ORDER BY used_at DESC
+            ''',
+            (chat_id, user_id, league_id, season)
+        )
+        used_lifelines = result.fetchall()
+    
+    response = "🎮 *Your Lifelines* 🎮\n\n"
+    
+    # Show available lifelines
+    response += "*Available Lifelines:*\n"
+    if lifelines:
+        for lifeline_id, lifeline in lifelines.items():
+            status = "✅ Available" if lifeline['remaining'] > 0 else "❌ Used up"
+            response += (
+                f"• *{lifeline['name']}* - {status}\n"
+                f"  {lifeline.get('description', '')}\n"
+                f"  Uses left: {lifeline['remaining']}/{lifeline['total_allowed']}\n\n"
+            )
+    else:
+        response += "No lifelines available for this season.\n\n"
+    
+    # Show used lifelines
+    if used_lifelines:
+        response += "\n*Used Lifelines:*\n"
+        for lifeline in used_lifelines:
+            lifeline_type, used_at, target_id, details = lifeline
+            lifeline_info = {
+                'coinflip': {'name': 'Coinflip', 'description': '50% chance to revive in current round'},
+                'goodluck': {'name': 'Good Luck', 'description': 'Force user to pick from bottom 6 teams'},
+                'forcechange': {'name': 'Force Change', 'description': 'Force user to change their team'}
+            }.get(lifeline_type, {'name': lifeline_type.title(), 'description': 'No description available'})
+            
+            used_time = used_at.strftime('%Y-%m-%d %H:%M')
+            target_info = f" on user {target_id}" if target_id else ""
+            details_info = f" ({details})" if details else ""
+            
+            response += (
+                f"• *{lifeline_info['name']}* - Used {used_time}{target_info}{details_info}\n"
+            )
+    
+    # Add usage instructions
+    response += "\n💡 *How to use lifelines:*\n"
+    response += "• `/uselifeline coinflip` - 50/50 chance to revive in current round\n"
+    response += "• `/uselifeline goodluck @username` - Force user to pick from bottom 6 teams\n"
+    response += "• `/uselifeline forcechange @username` - Force user to change their team"
+    
+    await update.message.reply_text(response, parse_mode='Markdown')
+
+async def use_lifeline_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Use a lifeline"""
+    if not context.args:
+        await update.message.reply_text(
+            "Please specify a lifeline to use.\n"
+            "Available lifelines: coinflip, goodluck, forcechange\n"
+            "Example: `/uselifeline coinflip` or `/uselifeline goodluck @username`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    lifeline_type = context.args[0].lower()
+    target_user = None
+    
+    # Check if a target user was mentioned
+    if len(context.args) > 1:
+        # Extract username from mention or use as is
+        mention = context.args[1]
+        if mention.startswith('@'):
+            target_user = mention[1:]
+        else:
+            target_user = mention
+    
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    season = get_season()
+    
+    # For now, use a default league ID
+    league_id = "global"
+    
+    # Use the lifeline
+    success, message = lifeline_manager.use_lifeline(
+        chat_id=chat_id,
+        user_id=user_id,
+        league_id=league_id,
+        lifeline_type=lifeline_type,
+        season=season,
+        target_user_id=target_user
+    )
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
 async def check_for_eliminations():
     """Check if gameweek has ended and process eliminations with roasting per group"""
     try:
@@ -1373,6 +1498,8 @@ def main():
         ("exportdata", export_data_to_logs),  # Temporary export command for migration
         ("kill", kill_user),  # Admin-only elimination command
         ("revive", revive_user),  # Admin-only revival command
+        ("lifelines", lifelines_command),  # Show available lifelines
+        ("uselifeline", use_lifeline_command),  # Use a lifeline
     ]
     
     for command, handler in command_handlers:

@@ -99,6 +99,43 @@ class DatabasePostgres:
         
         self.Session = sessionmaker(bind=self.engine)
         self.init_database()
+        self._init_lifelines_tables()
+    
+    def _init_lifelines_tables(self):
+        """Initialize lifelines-related tables"""
+        with self.engine.connect() as conn:
+            # Lifeline usage tracking
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS lifeline_usage (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    league_id TEXT NOT NULL,
+                    lifeline_type TEXT NOT NULL,
+                    season TEXT NOT NULL,
+                    used_at TIMESTAMP NOT NULL,
+                    target_user_id BIGINT,
+                    details TEXT,
+                    UNIQUE(chat_id, user_id, league_id, season, lifeline_type)
+                )
+            ''')
+            
+            # Track team assignments when Force Change is used
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS force_changes (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    league_id TEXT NOT NULL,
+                    original_team TEXT NOT NULL,
+                    new_team TEXT,
+                    gameweek INTEGER NOT NULL,
+                    used_at TIMESTAMP NOT NULL,
+                    season TEXT NOT NULL,
+                    target_user_id BIGINT
+                )
+            ''')
+            conn.commit()
     
     def init_database(self):
         """Initialize the database with required tables"""
