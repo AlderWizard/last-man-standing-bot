@@ -261,15 +261,24 @@ class LifelineManager:
         
     def get_force_changes(self, chat_id: int, league_id: str, gameweek: int) -> List[Dict]:
         """Get all force changes for a specific chat, league, and gameweek"""
-        cursor = self.db_conn.cursor()
-        cursor.execute('''
-            SELECT id, user_id, target_user_id, original_team, new_team, used_at
-            FROM force_changes
-            WHERE chat_id = ? AND league_id = ? AND gameweek = ?
-        ''', (chat_id, league_id, gameweek))
+        from sqlalchemy import text
         
-        columns = ['id', 'user_id', 'target_user_id', 'original_team', 'new_team', 'used_at']
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        with self.db_conn.connect() as conn:
+            result = conn.execute(
+                text('''
+                    SELECT id, user_id, target_user_id, original_team, new_team, used_at
+                    FROM force_changes
+                    WHERE chat_id = :chat_id AND league_id = :league_id AND gameweek = :gameweek
+                '''),
+                {
+                    'chat_id': chat_id,
+                    'league_id': league_id,
+                    'gameweek': gameweek
+                }
+            )
+            
+            columns = ['id', 'user_id', 'target_user_id', 'original_team', 'new_team', 'used_at']
+            return [dict(zip(columns, row)) for row in result.fetchall()]
 
     def get_season(self) -> str:
         """Get current season in YYYY-YY format"""
