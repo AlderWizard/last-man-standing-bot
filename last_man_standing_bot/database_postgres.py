@@ -95,7 +95,10 @@ class DatabasePostgres:
         else:
             # SQLite for local development
             import os
+            # Use the database in the project root directory
             db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lastman.db')
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
             self.engine = create_engine(f'sqlite:///{db_path}')
             logger.info(f"Connected to SQLite database at {db_path}")
         
