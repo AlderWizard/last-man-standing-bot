@@ -36,67 +36,71 @@ class LifelineManager:
     
     def _init_tables(self):
         """Initialize lifeline tables in the database"""
-        cursor = self.db_conn.cursor()
+        from sqlalchemy import text
         
-        # Lifeline usage tracking
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS lifeline_usage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                league_id TEXT NOT NULL,
-                lifeline_type TEXT NOT NULL,
-                season TEXT NOT NULL,
-                used_at TEXT NOT NULL,
-                target_user_id TEXT,
-                details TEXT,
-                UNIQUE(chat_id, user_id, league_id, season, lifeline_type)
-            )
-        ''')
-        
-        # Track team assignments when Force Change is used
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS force_changes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                league_id TEXT NOT NULL,
-                original_team TEXT NOT NULL,
-                new_team TEXT NOT NULL,
-                gameweek INTEGER NOT NULL,
-                used_at TEXT NOT NULL,
-                season TEXT NOT NULL,
-                target_user_id INTEGER
-            )
-        ''')
-        
-        self.db_conn.commit()
+        with self.db_conn.connect() as conn:
+            # Lifeline usage tracking
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS lifeline_usage (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    league_id TEXT NOT NULL,
+                    lifeline_type TEXT NOT NULL,
+                    season TEXT NOT NULL,
+                    used_at TIMESTAMP NOT NULL,
+                    target_user_id BIGINT,
+                    details TEXT,
+                    UNIQUE(chat_id, user_id, league_id, season, lifeline_type)
+                )
+            '''))
+            
+            # Track team assignments when Force Change is used
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS force_changes (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    league_id TEXT NOT NULL,
+                    original_team TEXT NOT NULL,
+                    new_team TEXT,
+                    gameweek INTEGER NOT NULL,
+                    used_at TIMESTAMP NOT NULL,
+                    season TEXT NOT NULL,
+                    target_user_id BIGINT
+                )
+            '''))
+            conn.commit()
     
     def get_available_lifelines(self, chat_id: int, user_id: int, league_id: str, season: str) -> Dict:
         """Get available lifelines for a user in a league"""
-        cursor = self.db_conn.cursor()
+        from sqlalchemy import text
         
-        # Get used lifelines for this user/league/season
-        cursor.execute('''
-            SELECT lifeline_type, COUNT(*) as used_count 
-            FROM lifeline_usage 
-            WHERE user_id = ? AND league_id = ? AND season = ?
-            GROUP BY lifeline_type
-        ''', (user_id, league_id, season))
-        
-        used_lifelines = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # Calculate remaining lifelines
-        available = {}
-        for lifeline_id, lifeline in self.LIFELINES.items():
-            used = used_lifelines.get(lifeline_id, 0)
-            remaining = max(0, lifeline['usage_limit'] - used)
+        with self.db_conn.connect() as conn:
+            # Get used lifelines for this user/league/season
+            result = conn.execute(
+                text('''
+                    SELECT lifeline_type, COUNT(*) as used_count 
+                    FROM lifeline_usage 
+                    WHERE user_id = :user_id AND league_id = :league_id AND season = :season
+                    GROUP BY lifeline_type
+                '''),
+                {'user_id': user_id, 'league_id': league_id, 'season': season}
+            )
             
-            available[lifeline_id] = {
-                'name': lifeline['name'],
-                'description': lifeline.get('description', ''),
-                'remaining': remaining,
-                'total_allowed': lifeline['usage_limit']
+            used_lifelines = {row[0]: row[1] for row in result.fetchall()}
+            
+            # Calculate remaining lifelines
+            available = {}
+            for lifeline_id, lifeline in self.LIFELINES.items():
+                used = used_lifelines.get(lifeline_id, 0)
+                remaining = max(0, lifeline['usage_limit'] - used)
+                
+                available[lifeline_id] = {
+                    'name': lifeline['name'],
+                    'description': lifeline.get('description', ''),
+                    'remaining': remaining,
+                    'total_allowed': lifeline['usage_limit']
             }
         
         return available
@@ -107,110 +111,139 @@ class LifelineManager:
                     details: Optional[Dict] = None) -> Tuple[bool, str]:
         """
         Attempt to use a lifeline
-        Returns (success: bool, message: str)
-        """
-        if lifeline_type not in self.LIFELINES:
-            return False, "❌ Invalid lifeline type"
         
-        # Check if user has lifelines remaining
+        Args:
+            chat_id: The chat ID where the lifeline is being used
+            user_id: The user ID using the lifeline
+            league_id: The league ID where the lifeline is being used
+            lifeline_type: Type of lifeline (must be in LIFELINES)
+            season: The current season (e.g., '2023-2024')
+            target_user_id: For lifelines that target another user (like Good Luck)
+            details: Additional details about the lifeline usage
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        from sqlalchemy import text
+        import json
+        
+        if lifeline_type not in self.LIFELINES:
+            return False, "❌ Invalid lifeline type."
+            
+        # Check if user has any remaining uses of this lifeline
         available = self.get_available_lifelines(chat_id, user_id, league_id, season)
         if available[lifeline_type]['remaining'] <= 0:
-            return False, f"❌ You've already used all your {self.LIFELINES[lifeline_type]['name']} lifelines this season"
+            return False, f"❌ You've already used all your {self.LIFELINES[lifeline_type]['name']} lifelines this season."
         
-        try:
-            # Handle specific lifeline logic
-            if lifeline_type == 'coinflip':
-                success = random.random() < 0.5
-                if success:
-                    message = "🎉 Heads! You've been revived and can continue in the current round!"
-                else:
-                    message = "😢 Tails! The lifeline didn't work. Better luck next time!"
-                
-                # Record the lifeline usage regardless of success
-                self._record_lifeline_usage(chat_id, user_id, league_id, lifeline_type, season, target_user_id, details)
-                return success, message
-                
-            elif lifeline_type == 'goodluck':
-                if not target_user_id:
-                    return False, "❌ Please specify a target user for this lifeline"
-                
-                # Get bottom 6 teams (this would need to be implemented)
-                bottom_teams = self._get_bottom_teams(league_id, season)
-                details = {'bottom_teams': bottom_teams}
-                
-                self._record_lifeline_usage(chat_id, user_id, league_id, lifeline_type, season, target_user_id, details)
-                return True, f"🎯 {target_user_id} must pick a team from the bottom 6: {', '.join(bottom_teams)}"
-                
-            elif lifeline_type == 'forcechange':
-                # Get the target user's current team
-                current_team = self._get_user_team(chat_id, target_user_id, league_id, season)
-                if not current_team:
-                    return False, "❌ Could not find the target user's current team"
-                
-                # Record the force change
-                # Get current gameweek (you'll need to implement this or pass it in)
-                current_gameweek = 1  # Default to 1, should be replaced with actual gameweek
-                self._record_force_change(
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    league_id=league_id,
-                    original_team=current_team,
-                    new_team=None,
-                    season=season,
-                    gameweek=current_gameweek,
-                    target_user_id=target_user_id
+        # Record the lifeline usage
+        with self.db_conn.connect() as conn:
+            try:
+                conn.execute(
+                    text('''
+                        INSERT INTO lifeline_usage 
+                        (chat_id, user_id, league_id, lifeline_type, season, used_at, target_user_id, details)
+                        VALUES (:chat_id, :user_id, :league_id, :lifeline_type, :season, NOW(), :target_user_id, :details)
+                    '''),
+                    {
+                        'chat_id': chat_id,
+                        'user_id': user_id,
+                        'league_id': league_id,
+                        'lifeline_type': lifeline_type,
+                        'season': season,
+                        'target_user_id': target_user_id,
+                        'details': json.dumps(details) if details else None
+                    }
                 )
-                return True, f"🔄 {target_user_id} has been forced to change their team for the next round"
                 
-        except Exception as e:
-            logger.error(f"Error using lifeline: {e}")
-            return False, f"❌ An error occurred: {str(e)}"
+                # Handle lifeline-specific logic
+                if lifeline_type == 'coinflip':
+                    if random.random() < 0.5:  # 50% chance
+                        return True, "🎉 Heads! You've been revived and are back in the game!"
+                    else:
+                        return True, "💀 Tails! Better luck next time!"
+                        
+                elif lifeline_type == 'goodluck':
+                    if not target_user_id:
+                        return False, "❌ Please specify a target user for the Good Luck lifeline."
+                    return True, f"✨ Good Luck has been cast on user {target_user_id}!"
+                    
+                elif lifeline_type == 'forcechange':
+                    if not details or 'original_team' not in details or 'new_team' not in details:
+                        return False, "❌ Invalid details for Force Change. Please specify original_team and new_team."
+                    self._record_force_change(
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        league_id=league_id,
+                        original_team=details['original_team'],
+                        new_team=details['new_team'],
+                        season=season,
+                        gameweek=1,  # Replace with actual gameweek
+                        target_user_id=target_user_id
+                    )
+                    return True, "🔄 Team change forced successfully!"
+                    
+                conn.commit()
+                return True, f"✅ {self.LIFELINES[lifeline_type]['name']} lifeline used successfully!"
+                
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Error using lifeline: {e}")
+                return False, "❌ An error occurred while using the lifeline. Please try again."
     
     def _record_lifeline_usage(self, chat_id: int, user_id: int, league_id: str, 
                              lifeline_type: str, season: str, 
                              target_user_id: Optional[int] = None,
                              details: Optional[Dict] = None):
         """Record lifeline usage in the database"""
-        cursor = self.db_conn.cursor()
-        cursor.execute('''
-            INSERT INTO lifeline_usage 
-            (chat_id, user_id, league_id, lifeline_type, season, used_at, target_user_id, details)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            chat_id, 
-            user_id, 
-            league_id, 
-            lifeline_type, 
-            season,
-            datetime.now().isoformat(),
-            target_user_id,
-            json.dumps(details) if details else None
-        ))
-        self.db_conn.commit()
+        from sqlalchemy import text
+        import json
+        
+        with self.db_conn.connect() as conn:
+            conn.execute(
+                text('''
+                    INSERT INTO lifeline_usage 
+                    (chat_id, user_id, league_id, lifeline_type, season, used_at, target_user_id, details)
+                    VALUES (:chat_id, :user_id, :league_id, :lifeline_type, :season, NOW(), :target_user_id, :details)
+                '''),
+                {
+                    'chat_id': chat_id,
+                    'user_id': user_id,
+                    'league_id': league_id,
+                    'lifeline_type': lifeline_type,
+                    'season': season,
+                    'target_user_id': target_user_id,
+                    'details': json.dumps(details) if details else None
+                }
+            )
+            conn.commit()
     
     def _record_force_change(self, chat_id: int, user_id: int, league_id: str, 
                            original_team: str, new_team: Optional[str], 
                            season: str, gameweek: int, target_user_id: Optional[int] = None) -> bool:
         """Record a force change action"""
+        from sqlalchemy import text
+        
         try:
-            cursor = self.db_conn.cursor()
-            cursor.execute('''
-                INSERT INTO force_changes 
-                (chat_id, user_id, league_id, original_team, new_team, gameweek, used_at, season, target_user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                chat_id,
-                user_id,
-                league_id,
-                original_team,
-                new_team if new_team is not None else "",  # Provide empty string as default
-                gameweek,
-                datetime.now().isoformat(),
-                season,
-                target_user_id
-            ))
-            self.db_conn.commit()
-            return True
+            with self.db_conn.connect() as conn:
+                conn.execute(
+                    text('''
+                        INSERT INTO force_changes 
+                        (chat_id, user_id, league_id, original_team, new_team, gameweek, used_at, season, target_user_id)
+                        VALUES (:chat_id, :user_id, :league_id, :original_team, :new_team, :gameweek, NOW(), :season, :target_user_id)
+                    '''),
+                    {
+                        'chat_id': chat_id,
+                        'user_id': user_id,
+                        'league_id': league_id,
+                        'original_team': original_team,
+                        'new_team': new_team,
+                        'gameweek': gameweek,
+                        'season': season,
+                        'target_user_id': target_user_id
+                    }
+                )
+                conn.commit()
+                return True
         except Exception as e:
             logger.error(f"Error recording force change: {e}")
             return False
