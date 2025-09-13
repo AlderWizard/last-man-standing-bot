@@ -1014,14 +1014,18 @@ async def lifelines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Get used lifelines from the database
     with db.engine.connect() as conn:
-        result = conn.execute(
-            '''
+        stmt = text('''
             SELECT lifeline_type, used_at, target_user_id, details
             FROM lifeline_usage
-            WHERE chat_id = %s AND user_id = %s AND league_id = %s AND season = %s
+            WHERE chat_id = :chat_id AND user_id = :user_id AND league_id = :league_id AND season = :season
             ORDER BY used_at DESC
-            ''',
-            (chat_id, user_id, league_id, season)
+        ''')
+        result = conn.execute(
+            stmt,
+            chat_id=chat_id,
+            user_id=user_id,
+            league_id=league_id,
+            season=season
         )
         used_lifelines = result.fetchall()
     

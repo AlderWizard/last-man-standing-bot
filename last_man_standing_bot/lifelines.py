@@ -82,10 +82,15 @@ class LifelineManager:
                 text('''
                     SELECT lifeline_type, COUNT(*) as used_count 
                     FROM lifeline_usage 
-                    WHERE user_id = :user_id AND league_id = :league_id AND season = :season
+                    WHERE chat_id = :chat_id AND user_id = :user_id AND league_id = :league_id AND season = :season
                     GROUP BY lifeline_type
                 '''),
-                {'user_id': user_id, 'league_id': league_id, 'season': season}
+                {
+                    'chat_id': chat_id,
+                    'user_id': user_id, 
+                    'league_id': league_id, 
+                    'season': season
+                }
             )
             
             used_lifelines = {row[0]: row[1] for row in result.fetchall()}
