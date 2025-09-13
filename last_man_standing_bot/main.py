@@ -1570,11 +1570,15 @@ def main():
         keep_alive_thread.start()
         logger.info("Continuous keep-alive monitor started")
     
+    # Initialize global variables first
+    global db, lifeline_manager, application
+    
+    # Initialize database and other core components
+    db = Database()
+    football_api = FootballAPI()
+    
     # Create Telegram application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
-    # Initialize database
-    global db, lifeline_manager
     
     # Initialize lifeline manager and store it in bot_data
     lifeline_manager = LifelineManager(db.engine)
