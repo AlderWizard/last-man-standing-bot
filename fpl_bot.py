@@ -22,6 +22,7 @@ from telegram.ext import (
 )
 
 from fpl_database import FPLDatabase
+from lifelines import LifelineManager
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +39,7 @@ class FPLBot:
         self.token = token
         self.application = Application.builder().token(token).build()
         self.db = FPLDatabase()
+        self.lifeline_manager = LifelineManager(self.db.conn)
         
         # Add handlers
         self.setup_handlers()
@@ -55,16 +57,22 @@ class FPLBot:
         )
     
     def setup_handlers(self):
-        """Set up command and message handlers"""
+        """Set up command handlers"""
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("addleague", self.add_league_command))
         self.application.add_handler(CommandHandler("leagues", self.list_leagues_command))
-        self.application.add_handler(CommandHandler("stats", self.league_stats_command))
+        self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("records", self.records_command))
-        self.application.add_handler(CommandHandler("speech", self.speech_reminder_command))
+        self.application.add_handler(CommandHandler("speech", self.speech_reminders_command))
         self.application.add_handler(CommandHandler("speechdone", self.mark_speech_done_command))
+        
+        # Lifeline commands
+        self.application.add_handler(CommandHandler("lifelines", self.lifelines_command))
+        self.application.add_handler(CommandHandler("uselifeline", self.use_lifeline_command))
+        
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start command handler"""
@@ -84,8 +92,129 @@ class FPLBot:
         await update.message.reply_text(welcome_text, parse_mode='Markdown')
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Help command handler"""
-        await self.start_command(update, context)
+        """Send a message when the command /help is issued"""
+        help_text = (
+            "🤖 *FPL Bot Commands*\n\n"
+            "• `/addleague <id>` - Add league to track\n"
+            "• `/leagues` - List tracked leagues\n"
+            "• `/stats <id>` - Show league standings\n"
+            "• `/records` - Show highest/lowest scores\n"
+            "• `/speech` - Check speech reminders\n"
+            "• `/speechdone <league_id> <gameweek>` - Mark speech as completed\n\n"
+            "🎮 *Lifeline Commands*\n"
+            "• `/lifelines` - View available lifelines\n"
+            "• `/uselifeline <type> [@username]` - Use a lifeline (coinflip, goodluck, forcechange)\n\n"
+            "• `/help` - Show this help message\n\n"
+            "To get started, add a league with `/addleague <your_league_id>`"
+        )
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+    
+    async def lifelines_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show available and used lifelines with details"""
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        
+        # Get current season
+        season = self.lifeline_manager.get_season()
+        
+        # For now, we'll use a default league ID since the command is user-specific
+        # In a real implementation, you might want to specify the league
+        league_id = "global"
+        
+        # Get available lifelines
+        lifelines = self.lifeline_manager.get_available_lifelines(chat_id, user_id, league_id, season)
+        
+        # Get used lifelines from the database
+        cursor = self.db.conn.cursor()
+        cursor.execute('''
+            SELECT lifeline_type, used_at, target_user_id, details
+            FROM lifeline_usage
+            WHERE chat_id = ? AND user_id = ? AND league_id = ? AND season = ?
+            ORDER BY used_at DESC
+        ''', (chat_id, user_id, league_id, season))
+        
+        used_lifelines = cursor.fetchall()
+        
+        response = "🎮 *Your Lifelines* 🎮\n\n"
+        
+        # Show available lifelines
+        response += "*Available Lifelines:*\n"
+        if lifelines:
+            for lifeline_id, lifeline in lifelines.items():
+                status = "✅ Available" if lifeline['remaining'] > 0 else "❌ Used up"
+                response += (
+                    f"• *{lifeline['name']}* - {status}\n"
+                    f"  {lifeline['description']}\n"
+                    f"  Uses left: {lifeline['remaining']}/{lifeline['total_allowed']}\n\n"
+                )
+        else:
+            response += "No lifelines available for this season.\n\n"
+        
+        # Show used lifelines
+        if used_lifelines:
+            response += "\n*Used Lifelines:*\n"
+            for lifeline in used_lifelines:
+                lifeline_type, used_at, target_id, details = lifeline
+                lifeline_info = self.lifeline_manager.LIFELINES.get(lifeline_type, 
+                    {'name': lifeline_type.title(), 'description': 'No description available'})
+                
+                used_time = datetime.fromisoformat(used_at).strftime('%Y-%m-%d %H:%M')
+                target_info = f" on user {target_id}" if target_id else ""
+                details_info = f" ({details})" if details else ""
+                
+                response += (
+                    f"• *{lifeline_info['name']}* - Used {used_time}{target_info}{details_info}\n"
+                )
+        
+        # Add usage instructions
+        response += "\n💡 *How to use lifelines:*\n"
+        response += "• `/uselifeline coinflip` - 50/50 chance to revive in current round\n"
+        response += "• `/uselifeline goodluck @username` - Force user to pick from bottom 6 teams\n"
+        response += "• `/uselifeline forcechange @username` - Force user to change their team"
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+    
+    async def use_lifeline_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Use a lifeline"""
+        if not context.args:
+            await update.message.reply_text(
+                "Please specify a lifeline to use.\n"
+                "Available lifelines: coinflip, goodluck, forcechange\n"
+                "Example: `/uselifeline coinflip` or `/uselifeline goodluck @username`",
+                parse_mode='Markdown'
+            )
+            return
+        
+        lifeline_type = context.args[0].lower()
+        target_user = None
+        
+        # Check if a target user was mentioned
+        if len(context.args) > 1:
+            # Extract username from mention or use as is
+            mention = context.args[1]
+            if mention.startswith('@'):
+                target_user = mention[1:]
+            else:
+                target_user = mention
+        
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        season = self.lifeline_manager.get_season()
+        
+        # For now, use a default league ID
+        league_id = "global"
+        
+        # Use the lifeline
+        success, message = self.lifeline_manager.use_lifeline(
+            chat_id=chat_id,
+            user_id=user_id,
+            league_id=league_id,
+            lifeline_type=lifeline_type,
+            season=season,
+            target_user_id=target_user
+        )
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
     
     async def add_league_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Add a league to track"""
