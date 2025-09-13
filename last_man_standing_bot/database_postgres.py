@@ -82,25 +82,33 @@ class GroupMember(Base):
 
 class DatabasePostgres:
     def __init__(self):
-        # Use PostgreSQL if DATABASE_URL is set (Render), otherwise SQLite for local dev
-        database_url = os.environ.get('DATABASE_URL')
-        
-        if database_url:
-            # PostgreSQL on Render
-            # Fix for Render's postgres:// URL (SQLAlchemy needs postgresql://)
-            if database_url.startswith('postgres://'):
-                database_url = database_url.replace('postgres://', 'postgresql://', 1)
-            self.engine = create_engine(database_url)
-            logger.info("Connected to PostgreSQL database")
-        else:
-            # SQLite for local development
-            import os
-            # Use the database in the project root directory
-            db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lastman.db')
-            # Ensure the directory exists
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
-            self.engine = create_engine(f'sqlite:///{db_path}')
-            logger.info(f"Connected to SQLite database at {db_path}")
+        try:
+            # Try to get database URL from environment variables
+            database_url = os.environ.get('DATABASE_URL')
+            
+            if database_url:
+                # PostgreSQL on Render
+                # Fix for Render's postgres:// URL (SQLAlchemy needs postgresql://)
+                if database_url.startswith('postgres://'):
+                    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+                self.engine = create_engine(database_url, pool_pre_ping=True)
+                logger.info("Successfully connected to PostgreSQL database")
+            else:
+                # Fallback to SQLite for local development
+                db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lastman.db')
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(db_path), exist_ok=True)
+                self.engine = create_engine(f'sqlite:///{db_path}', connect_args={"check_same_thread": False})
+                logger.info(f"Using SQLite database at {db_path}")
+                
+            # Test the connection
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                
+        except Exception as e:
+            logger.critical(f"Failed to initialize database connection: {str(e)}")
+            logger.critical(f"DATABASE_URL: {'set' if os.environ.get('DATABASE_URL') else 'not set'}")
+            raise
         
         self.Session = sessionmaker(bind=self.engine)
         self.init_database()

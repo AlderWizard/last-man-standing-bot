@@ -52,6 +52,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Set up logging for other modules
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+
 # Global variables
 global db, football_api, lifeline_manager, application
 
@@ -274,7 +279,7 @@ async def pick_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
                 
         except Exception as e:
-            logging.error(f"Error in fuzzy team search: {e}")
+            logger.error(f"Error in fuzzy team search: {e}")
             await update.message.reply_text("❌ Error searching for team. Please try again.")
             return
         
@@ -371,7 +376,7 @@ async def change_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ Couldn't find team '{team_name}'. Please check spelling.")
                 return
         except Exception as e:
-            logging.error(f"API error searching for team: {e}")
+            logger.error(f"API error searching for team: {e}")
             await update.message.reply_text("❌ Error connecting to football API. Please try again later.")
             return
         
@@ -401,7 +406,7 @@ async def change_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
     except Exception as e:
-        logging.error(f"Error in change_pick: {e}")
+        logger.error(f"Error in change_pick: {e}")
         await update.message.reply_text("❌ An error occurred. Please try again.")
 
 async def survivors(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -669,7 +674,7 @@ async def round_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message)
         
     except Exception as e:
-        logging.error(f"Error in round_info: {e}")
+        logger.error(f"Error in round_info: {e}")
         await update.message.reply_text("❌ Error getting gameweek information. Please try again.")
 
 async def kill_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -862,12 +867,12 @@ async def send_reminder_to_groups():
                         text=message,
                         parse_mode='Markdown'
                     )
-                    logging.info(f"Sent reminder to group {chat_title} ({chat_id})")
+                    logger.info(f"Sent reminder to group {chat_title} ({chat_id})")
                 except Exception as e:
-                    logging.error(f"Failed to send reminder to group {chat_id}: {e}")
+                    logger.error(f"Failed to send reminder to group {chat_id}: {e}")
                     
     except Exception as e:
-        logging.error(f"Error in send_reminder_to_groups: {e}")
+        logger.error(f"Error in send_reminder_to_groups: {e}")
 
 async def send_winner_announcement(winner_name, gameweek, chat_id):
     """Send winner announcement to specific group"""
@@ -888,12 +893,12 @@ async def send_winner_announcement(winner_name, gameweek, chat_id):
                 chat_id=chat_id,
                 text=message
             )
-            logging.info(f"Sent winner announcement to group {chat_id}")
+            logger.info(f"Sent winner announcement to group {chat_id}")
         except Exception as e:
-            logging.error(f"Failed to send winner announcement to group {chat_id}: {e}")
+            logger.error(f"Failed to send winner announcement to group {chat_id}: {e}")
                 
     except Exception as e:
-        logging.error(f"Error in send_winner_announcement: {e}")
+        logger.error(f"Error in send_winner_announcement: {e}")
 
 async def send_competition_reset_announcement(chat_id):
     """Send competition reset announcement to specific group"""
@@ -913,12 +918,12 @@ async def send_competition_reset_announcement(chat_id):
                 chat_id=chat_id,
                 text=message
             )
-            logging.info(f"Sent competition reset announcement to group {chat_id}")
+            logger.info(f"Sent competition reset announcement to group {chat_id}")
         except Exception as e:
-            logging.error(f"Failed to send reset announcement to group {chat_id}: {e}")
+            logger.error(f"Failed to send reset announcement to group {chat_id}: {e}")
                 
     except Exception as e:
-        logging.error(f"Error in send_competition_reset_announcement: {e}")
+        logger.error(f"Error in send_competition_reset_announcement: {e}")
 
 async def roast_deadline_missers(missed_users, gameweek, chat_id):
     """Send funny roast messages for users who missed the deadline to specific group"""
@@ -955,12 +960,12 @@ async def roast_deadline_missers(missed_users, gameweek, chat_id):
                 chat_id=chat_id,
                 text=message
             )
-            logging.info(f"Sent deadline miss roast to group {chat_id}")
+            logger.info(f"Sent deadline miss roast to group {chat_id}")
         except Exception as e:
-            logging.error(f"Failed to send deadline roast to group {chat_id}: {e}")
+            logger.error(f"Failed to send deadline roast to group {chat_id}: {e}")
                 
     except Exception as e:
-        logging.error(f"Error in roast_deadline_missers: {e}")
+        logger.error(f"Error in roast_deadline_missers: {e}")
 
 async def roast_eliminated_users(eliminated_users, gameweek, chat_id, all_eliminated=False):
     """Send savage elimination messages to specific group"""
@@ -1012,12 +1017,12 @@ async def roast_eliminated_users(eliminated_users, gameweek, chat_id, all_elimin
                 chat_id=chat_id,
                 text=message
             )
-            logging.info(f"Sent elimination roast to group {chat_id}")
+            logger.info(f"Sent elimination roast to group {chat_id}")
         except Exception as e:
-            logging.error(f"Failed to send elimination roast to group {chat_id}: {e}")
+            logger.error(f"Failed to send elimination roast to group {chat_id}: {e}")
                 
     except Exception as e:
-        logging.error(f"Error in roast_eliminated_users: {e}")
+        logger.error(f"Error in roast_eliminated_users: {e}")
 
 async def lifelines_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show available and used lifelines with details"""
@@ -1268,7 +1273,7 @@ async def check_for_eliminations():
                             await send_competition_reset_announcement(chat_id)
                             
                         except Exception as e:
-                            logging.error(f"Error resetting competition for group {chat_id}: {e}")
+                            logger.error(f"Error resetting competition for group {chat_id}: {e}")
                     
                     # NO JOINT WINNERS RULE: If no one won in this group, eliminate everyone
                     elif not surviving_users and eliminated_users:
@@ -1291,7 +1296,7 @@ async def check_for_eliminations():
                             await send_competition_reset_announcement(chat_id)
                             
                         except Exception as e:
-                            logging.error(f"Error resetting competition for group {chat_id}: {e}")
+                            logger.error(f"Error resetting competition for group {chat_id}: {e}")
                         
                     elif eliminated_users:
                         # Normal elimination - some won, some lost in this group
@@ -1304,7 +1309,7 @@ async def check_for_eliminations():
                         await roast_eliminated_users(non_deadline_eliminated, current_gameweek, chat_id)
                     
     except Exception as e:
-        logging.error(f"Error in check_for_eliminations: {e}")
+        logger.error(f"Error in check_for_eliminations: {e}")
 
 def check_and_send_reminders():
     """Wrapper function for scheduler"""
