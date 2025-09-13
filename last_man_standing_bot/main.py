@@ -179,11 +179,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message += f"• `/mypicks` - View your pick history\n"
     welcome_message += f"• `/survivors` - See who's still alive\n"
     welcome_message += f"• `/winners` - Hall of fame leaderboard\n"
-    welcome_message += f"• `/round` - Current gameweek info\n\n"
+    welcome_message += f"• `/round` - Current gameweek info\n"
+    welcome_message += f"• `/lifelines` - View available lifelines\n\n"
+    welcome_message += f"🔹 **Lifelines:**\n"
+    welcome_message += f"• **Second Chance** - Survive one loss (one-time use)\n"
+    welcome_message += f"• **Team Block** - Block a team for one gameweek (one-time use)\n"
+    welcome_message += f"• **Deadline Extension** - Extend deadline by 1 hour (one-time use)\n"
+    welcome_message += f"• **Team Reveal** - See which teams have been picked (one-time use)\n\n"
     welcome_message += f"💡 **Remember:** You can only use each team ONCE per competition!\n"
     welcome_message += f"🚫 **Warning:** If ALL survivors draw/lose in a round, EVERYONE is eliminated!\n"
     welcome_message += f"🔄 **Auto-Reset:** When all players are out, a new competition starts automatically!\n"
-    welcome_message += f"Good luck! 🍀"
+    welcome_message += f"\nUse `/lifelines` to see your available lifelines and how to use them. Good luck! 🍀"
     
     await update.message.reply_text(welcome_message)
 
