@@ -248,30 +248,52 @@ class FootballAPI:
             data = response.json()
             
             if 'events' not in data:
-                raise ValueError("No events in FPL API response")
-            
-            # Sort all events by ID to ensure correct order
-            all_events = sorted(data['events'], key=lambda x: x['id'])
+                logger.error("No 'events' key in FPL API response")
+                return None, None
+                
+            events = data['events']
             
             # Add datetime objects for each event's deadline
-            for event in all_events:
-                event['deadline_dt'] = datetime.fromisoformat(
-                    event['deadline_time'].replace('Z', '+00:00')
-                ).replace(tzinfo=timezone.utc)
+            for event in events:
+                if 'deadline_time' in event:
+                    try:
+                        event['deadline_dt'] = datetime.fromisoformat(
+                            event['deadline_time'].replace('Z', '+00:00')
+                        ).replace(tzinfo=timezone.utc)
+                    except (ValueError, AttributeError) as e:
+                        logger.warning(f"Error parsing deadline time for event {event.get('id')}: {e}")
+                        event['deadline_dt'] = None
             
-            # Find the next upcoming deadline
-            upcoming_events = [e for e in all_events if e['deadline_dt'] > now]
-            next_upcoming = min(upcoming_events, key=lambda x: x['deadline_dt']) if upcoming_events else None
+            # Find current and next gameweeks
+            current_gw = next((e for e in events if e.get('is_current')), None)
+            next_gw = next((e for e in events if e.get('is_next')), None)
             
-            # Determine the current gameweek
-            if next_upcoming:
-                # If there's an upcoming deadline, that's the current gameweek
+            # If we have a current gameweek with a deadline
+            if current_gw and 'deadline_dt' in current_gw and current_gw['deadline_dt']:
+                # If deadline has passed and we have a next gameweek, use that instead
+                if now > current_gw['deadline_dt'] and next_gw and not current_gw.get('finished', False):
+                    logger.info(f"Current gameweek {current_gw['id']} deadline has passed, moving to next gameweek {next_gw['id']}")
+                    return next_gw['id'], next_gw
+                
+                # Otherwise, return the current gameweek
+                return current_gw['id'], current_gw
+            
+            # Fallback: Find the next upcoming deadline
+            upcoming_events = [e for e in events if 'deadline_dt' in e and e['deadline_dt'] and e['deadline_dt'] > now]
+            if upcoming_events:
+                next_upcoming = min(upcoming_events, key=lambda x: x['deadline_dt'])
                 return next_upcoming['id'], next_upcoming
-            elif all_events:
-                # If no upcoming deadlines, return the most recent gameweek
-                return all_events[-1]['id'], all_events[-1]
+                
+            # Fallback to first unfinished gameweek
+            for event in events:
+                if not event.get('finished', False):
+                    return event['id'], event
             
-            raise ValueError("No valid gameweeks found in FPL API")
+            # If all else fails, return the last gameweek
+            if events:
+                return events[-1]['id'], events[-1]
+                
+            return None, None
             
         except Exception as e:
             logger.error(f"Error in _get_fpl_current_gameweek: {e}")
