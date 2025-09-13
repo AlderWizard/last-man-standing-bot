@@ -1508,6 +1508,86 @@ def run_health_server():
         logger.error(f"Failed to start health server: {e}")
         raise
 
+async def admin_add_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to manually add a pick for a player
+    
+    Usage: /addpick @username TeamName [Gameweek]
+    """
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    # Only allow in groups
+    if update.effective_chat.type not in ['group', 'supergroup']:
+        await update.message.reply_text("❌ This command only works in group chats!")
+        return
+    
+    # Check if user is admin
+    try:
+        chat_member = await context.bot.get_chat_member(chat_id, user.id)
+        if chat_member.status not in ['administrator', 'creator']:
+            await update.message.reply_text("❌ Only administrators can use this command!")
+            return
+    except Exception as e:
+        logger.error(f"Error checking admin status: {e}")
+        await update.message.reply_text("❌ Error verifying admin status.")
+        return
+    
+    # Check command format
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "❌ Invalid format. Usage: /addpick @username TeamName [Gameweek]\n"
+            "Example: /addpick @john_doe Liverpool"
+        )
+        return
+    
+    # Parse command arguments
+    try:
+        username = context.args[0].lstrip('@')
+        team_name = ' '.join(context.args[1:-1]) if len(context.args) > 2 else context.args[1]
+        gameweek = int(context.args[-1]) if len(context.args) > 2 and context.args[-1].isdigit() else get_current_gameweek()
+        
+        # Get user ID from username
+        user_id = None
+        if username.isdigit():
+            user_id = int(username)
+        else:
+            # Search for user by username
+            chat_members = await context.bot.get_chat_members(chat_id)
+            for member in chat_members:
+                if member.user.username and member.user.username.lower() == username.lower():
+                    user_id = member.user.id
+                    break
+            
+            if not user_id:
+                await update.message.reply_text(f"❌ Could not find user @{username} in this group.")
+                return
+        
+        # Search for team
+        team_info = football_api.search_team(team_name, DEFAULT_LEAGUE)
+        if not team_info:
+            await update.message.reply_text(f"❌ Could not find team '{team_name}'. Please check spelling.")
+            return
+        
+        # Add pick to database
+        db.add_pick(user_id, gameweek, team_info['name'], team_info['id'], None, chat_id)
+        
+        # Get user's display name
+        member = await context.bot.get_chat_member(chat_id, user_id)
+        display_name = member.user.first_name
+        if member.user.last_name:
+            display_name += f" {member.user.last_name}"
+        
+        await update.message.reply_text(
+            f"✅ Successfully added pick for {display_name}:\n"
+            f"🏆 Team: {team_info['name']}\n"
+            f"📅 Gameweek: {gameweek}\n"
+            f"👤 User: @{member.user.username or 'N/A'}"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in admin_add_pick: {e}")
+        await update.message.reply_text("❌ An error occurred while adding the pick. Please check the format and try again.")
+
 async def debug_picks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Debug command to check pick-related issues"""
     user = update.effective_user
@@ -1619,6 +1699,7 @@ def main():
         ("exportdata", export_data_to_logs),  # Temporary export command for migration
         ("kill", kill_user),  # Admin-only elimination command
         ("revive", revive_user),  # Admin-only revival command
+        ("addpick", admin_add_pick),  # Admin-only add pick command
         ("lifelines", lifelines_command),  # Show available lifelines
         ("uselifeline", use_lifeline_command),  # Use a lifeline
     ]
