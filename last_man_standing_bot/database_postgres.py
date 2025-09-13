@@ -94,8 +94,10 @@ class DatabasePostgres:
             logger.info("Connected to PostgreSQL database")
         else:
             # SQLite for local development
-            self.engine = create_engine('sqlite:///lastman.db')
-            logger.info("Connected to SQLite database (local development)")
+            import os
+            db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lastman.db')
+            self.engine = create_engine(f'sqlite:///{db_path}')
+            logger.info(f"Connected to SQLite database at {db_path}")
         
         self.Session = sessionmaker(bind=self.engine)
         self.init_database()
