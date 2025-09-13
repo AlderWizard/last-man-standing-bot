@@ -55,14 +55,16 @@ logger = logging.getLogger(__name__)
 # Initialize core components
 db = Database()
 football_api = FootballAPI()
-lifeline_manager = LifelineManager(db.engine)
 
 # ============================================================================
 # GLOBAL VARIABLES AND CONSTANTS
 # ============================================================================
 
 # Global application instance for background tasks
-application = None
+application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+# Initialize lifeline manager and store it in bot_data
+application.bot_data['lifeline_manager'] = LifelineManager(db.engine)
 
 # ============================================================================
 # ROAST MESSAGE CONSTANTS
