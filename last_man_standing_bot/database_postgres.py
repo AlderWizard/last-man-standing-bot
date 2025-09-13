@@ -566,11 +566,14 @@ class DatabasePostgres:
         try:
             rollover = session.query(Rollover).filter_by(chat_id=chat_id).first()
             if rollover:
+                old_count = rollover.count
                 rollover.count = 0
                 rollover.updated_at = datetime.utcnow()
+                logger.info(f"Rollover reset for group {chat_id}. Previous count: {old_count}")
             else:
                 rollover = Rollover(chat_id=chat_id, count=0)
                 session.add(rollover)
+                logger.info(f"New rollover entry created for group {chat_id} with count 0")
             session.commit()
         except Exception as e:
             session.rollback()
@@ -596,7 +599,7 @@ class DatabasePostgres:
             if rollover_count == 0:
                 pot_per_player = 2  # Base pot: £2 per player
             elif rollover_count == 1:
-                pot_per_player = 5  # After 1 rollover: £5 per player
+                pot_per_player = 5  # £2 + £3 on first rollover
             else:
                 pot_per_player = 5 + ((rollover_count - 1) * 5)  # £5 + £5 per additional rollover
             
@@ -617,15 +620,18 @@ class DatabasePostgres:
             if rollover:
                 rollover.count += 1
                 rollover.updated_at = datetime.utcnow()
+                new_count = rollover.count
             else:
                 rollover = Rollover(chat_id=chat_id, count=1)
                 session.add(rollover)
-            
+                new_count = 1
             session.commit()
-            logger.info(f"Rollover incremented for group {chat_id}: {rollover.count}")
+            logger.info(f"Rollover incremented for group {chat_id}. New count: {new_count}")
+            return new_count
         except Exception as e:
             session.rollback()
             logger.error(f"Error incrementing rollover for group {chat_id}: {e}")
+            return 0
         finally:
             session.close()
     
