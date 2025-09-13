@@ -52,10 +52,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global variables
+global db, football_api, lifeline_manager, application
+
 # Initialize core components
 db = None
 football_api = None
 lifeline_manager = None
+application = None
 
 # ============================================================================
 # GLOBAL VARIABLES AND CONSTANTS
@@ -1569,9 +1573,6 @@ def main():
         keep_alive_thread = threading.Thread(target=continuous_keep_alive, daemon=True)
         keep_alive_thread.start()
         logger.info("Continuous keep-alive monitor started")
-    
-    # Initialize global variables first
-    global db, lifeline_manager, application
     
     # Initialize database and other core components
     db = Database()
