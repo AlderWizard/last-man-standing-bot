@@ -216,19 +216,116 @@ class FootballAPI:
         return None
     
     def get_current_gameweek(self, league_id=39, season=DEFAULT_SEASON):
-        """Get current gameweek information from FPL API"""
+        """Get current gameweek based on match schedules and FPL deadlines
+        
+        Returns:
+            int: The current gameweek number that should be active for picks
+        """
         try:
-            # Use FPL API for gameweek detection
-            current_gw, gw_data = self._get_fpl_current_gameweek(season)
-            if current_gw:
-                logger.info(f"FPL API returned current gameweek: {current_gw}")
-                return current_gw
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
             
-            raise ValueError("FPL API did not return a valid gameweek")
+            # First, try to get the current gameweek from FPL API
+            try:
+                # Get FPL data
+                response = requests.get(
+                    "https://fantasy.premierleague.com/api/bootstrap-static/",
+                    timeout=10
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                # Find current and next gameweeks
+                events = data.get('events', [])
+                current_gw = next((e for e in events if e.get('is_current')), None)
+                next_gw = next((e for e in events if e.get('is_next')), None)
+                
+                if current_gw and next_gw:
+                    # Check if we're in the gap between gameweeks
+                    current_deadline = datetime.fromisoformat(
+                        current_gw['deadline_time'].replace('Z', '+00:00')
+                    ).replace(tzinfo=timezone.utc)
+                    
+                    next_deadline = datetime.fromisoformat(
+                        next_gw['deadline_time'].replace('Z', '+00:00')
+                    ).replace(tzinfo=timezone.utc)
+                    
+                    # If we're past the current GW deadline, we're in the next GW
+                    if now > current_deadline and now < next_deadline:
+                        return int(next_gw['id'])
+                    return int(current_gw['id'])
+                
+            except Exception as e:
+                logger.warning(f"Couldn't get FPL data, falling back to direct API: {e}")
+            
+            # Fallback: Use direct API to determine gameweek
+            url = f"{self.base_url}/fixtures"
+            params = {
+                'league': league_id,
+                'season': season.split('-')[0],
+                'timezone': 'Europe/London',
+                'status': 'NS-1H-HT-2H-ET-P-BT-INT-LIVE-FT-AET-PEN-BT-ABD-CANC-PST-SUSP-INT_PEN'
+            }
+            
+            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if not data.get('response'):
+                logger.error("No fixtures found in API response")
+                return 1
+            
+            # Get all fixtures grouped by gameweek
+            gw_fixtures = {}
+            for fixture in data['response']:
+                gw = int(fixture['league']['round'].split(' ')[-1])
+                if gw not in gw_fixtures:
+                    gw_fixtures[gw] = []
+                gw_fixtures[gw].append(fixture)
+            
+            if not gw_fixtures:
+                return 1
+            
+            # Find the most recent gameweek with completed matches
+            current_gw = None
+            for gw in sorted(gw_fixtures.keys()):
+                fixtures = gw_fixtures[gw]
+                # Check if all matches in this GW are finished
+                if all(f['fixture']['status']['short'] in ['FT', 'AET', 'PEN'] 
+                      for f in fixtures if f['fixture']['status']['short'] not in ['PST', 'CANC']):
+                    current_gw = gw
+            
+            # If no completed gameweeks, return the first one
+            if current_gw is None:
+                return min(gw_fixtures.keys())
+                
+            # If we have a next gameweek, return it, otherwise stay on current
+            next_gw = current_gw + 1
+            return next_gw if next_gw in gw_fixtures else current_gw
             
         except Exception as e:
-            logger.error(f"Error getting current gameweek from FPL API: {e}")
-            raise RuntimeError("Failed to determine current gameweek - FPL API is unavailable")
+            logger.error(f"Error in get_current_gameweek: {e}")
+            # Fallback: Use system date to estimate current gameweek
+            # This is a very rough estimate and should only be used as last resort
+            season_start = datetime(int(season.split('-')[0]), 8, 1)  # August 1st of season start year
+            days_since_start = (now - season_start).days
+            estimated_gw = (days_since_start // 7) + 1
+            return max(1, min(38, estimated_gw))  # Clamp between 1 and 38
+            
+        except Exception as e:
+            logger.error(f"Error getting current gameweek from football API: {e}")
+            # Fallback to FPL API if the main API fails
+            try:
+                current_gw, _ = self._get_fpl_current_gameweek(season)
+                if current_gw:
+                    logger.info(f"FPL fallback returned gameweek: {current_gw}")
+                    return current_gw
+            except Exception as fpl_error:
+                logger.error(f"FPL fallback also failed: {fpl_error}")
+            
+            # If all else fails, return a default value or raise an error
+            logger.warning("Could not determine current gameweek, defaulting to 1")
+            return 1
     
     def _get_fpl_current_gameweek(self, season=None):
         """Get current gameweek from FPL API with improved gameweek transition handling"""

@@ -638,43 +638,101 @@ async def export_data_to_logs(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Export command error: {e}")
 
 async def round_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show current gameweek information with dynamic deadlines"""
+    """Show current and next gameweek information with dynamic deadlines"""
     try:
-        current_gameweek = get_current_gameweek()
-        deadline = football_api.get_gameweek_deadline(current_gameweek)
-        picks_allowed = football_api.is_picks_allowed(current_gameweek)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
         
-        # Get fixture information for this gameweek
-        fixtures = football_api.get_gameweek_fixtures(current_gameweek)
+        # Get current gameweek (the one being played now or most recently completed)
+        current_gameweek = football_api.get_current_gameweek()
         
-        message = f"📅 **Gameweek {current_gameweek} Information**\n\n"
+        # Get next gameweek (the one we're picking for)
+        next_gameweek = current_gameweek + 1
         
-        if deadline:
-            deadline_str = deadline.strftime("%A %d %B at %H:%M")
-            message += f"🕒 **Pick Deadline:** {deadline_str}\n"
-        else:
-            message += f"🕒 **Pick Deadline:** TBD\n"
+        # Get deadlines and statuses
+        current_deadline = football_api.get_gameweek_deadline(current_gameweek)
+        next_deadline = football_api.get_gameweek_deadline(next_gameweek)
         
-        if picks_allowed:
-            message += f"✅ **Status:** Picks are OPEN\n"
-        else:
-            message += f"❌ **Status:** Picks are CLOSED\n"
+        # Determine if we're in the gap between gameweeks
+        is_between_gameweeks = False
+        if current_deadline and next_deadline:
+            is_between_gameweeks = now > current_deadline and now < next_deadline
         
-        message += f"⚽ **League:** Premier League\n\n"
+        # Get fixtures for both gameweeks
+        current_fixtures = football_api.get_gameweek_fixtures(current_gameweek)
+        next_fixtures = football_api.get_gameweek_fixtures(next_gameweek)
         
-        # Show some fixtures if available
-        if fixtures:
-            message += f"🏟️ **Upcoming Matches:**\n"
-            for i, fixture in enumerate(fixtures[:3]):  # Show first 3 matches
-                from datetime import datetime
-                match_time = datetime.fromtimestamp(fixture['timestamp'])
-                time_str = match_time.strftime("%a %H:%M")
-                message += f"• {fixture['home_team']} vs {fixture['away_team']} ({time_str})\n"
+        # Build the message
+        message = "⚽ *Premier League Gameweeks* ⚽\n\n"
+        
+        # Current Gameweek Section (matches being played now or just finished)
+        message += f"📅 **GAMEWEEK {current_gameweek} - "
+        
+        if current_fixtures:
+            # Check if all matches are finished
+            all_finished = all(
+                f['fixture']['status']['short'] in ['FT', 'AET', 'PEN']
+                for f in current_fixtures
+                if f['fixture']['status']['short'] not in ['PST', 'CANC']
+            )
             
-            if len(fixtures) > 3:
-                message += f"... and {len(fixtures) - 3} more matches\n"
+            if all_finished:
+                message += f"COMPLETED** ✅\n"
+                message += "All matches have finished. Waiting for next gameweek.\n"
+            else:
+                # Check if any matches are in progress
+                in_progress = any(
+                    f['fixture']['status']['short'] in ['1H', 'HT', '2H', 'ET', 'P', 'BT', 'LIVE']
+                    for f in current_fixtures
+                )
+                
+                if in_progress:
+                    message += f"IN PROGRESS** ⏳\n"
+                    message += f"Matches are currently being played. Picks are closed.\n"
+                else:
+                    # Matches are scheduled but not started
+                    next_match = min(
+                        (f for f in current_fixtures 
+                         if f['fixture']['status']['short'] in ['NS', 'TBD']),
+                        key=lambda x: x['fixture']['timestamp']
+                    )
+                    match_time = datetime.fromtimestamp(next_match['fixture']['timestamp'])
+                    time_str = match_time.strftime("%A %d %B at %H:%M")
+                    message += f"UPCOMING** 🕒\n"
+                    message += f"Next match: {time_str}\n"
         
-        message += f"\n💡 **Remember:** Pick a team you think will WIN!\nDraws count as elimination!"
+        # Next Gameweek Section (for making picks)
+        message += "\n📅 **NEXT GAMEWEEK**\n"
+        
+        if is_between_gameweeks:
+            message += f"🔄 **Gameweek {next_gameweek} - PICKS OPEN** ✅\n"
+            
+            if next_deadline:
+                deadline_str = next_deadline.strftime("%A %d %B at %H:%M")
+                time_left = next_deadline - now
+                hours_left = int(time_left.total_seconds() // 3600)
+                
+                message += f"⏳ Deadline: {deadline_str} "
+                message += f"({hours_left} hours from now)\n\n"
+                
+                # Show next gameweek's matches
+                if next_fixtures:
+                    message += f"🏟️ *Upcoming Matches in GW{next_gameweek}:*\n"
+                    for i, fixture in enumerate(next_fixtures[:3]):
+                        match_time = datetime.fromtimestamp(fixture['fixture']['timestamp'])
+                        time_str = match_time.strftime("%a %d %b %H:%M")
+                        message += f"• {fixture['teams']['home']['name']} vs {fixture['teams']['away']['name']}\n   ⏰ {time_str}\n"
+                    
+                    if len(next_fixtures) > 3:
+                        message += f"... and {len(next_fixtures) - 3} more matches\n"
+            
+            message += "\n💡 *Make your pick now using /pick command!*"
+        else:
+            message += "Picks will open after the current gameweek finishes.\n"
+            message += "Check back later to make your selection!"
+        
+        # Add general instructions
+        message += "\n\n📌 *Remember:* Pick a team you think will WIN!\nDraws count as elimination!"
         
         await update.message.reply_text(message)
         
